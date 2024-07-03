@@ -1,0 +1,13 @@
+numpy
+pre-commit>=2.2.0
+pytest>=5.4.1
+scikit-learn>=0.23
+scipy>=1.0
+tqdm
+torch
+lightgbm
+xgboost
+pandas
+matplotlib
+jupyterlab
+seaborn
