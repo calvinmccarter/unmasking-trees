@@ -12,6 +12,7 @@ import numpy as np
 
 from kditransform import KDITransformer
 from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.cluster import KMeans
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.utils import (
     check_random_state,
@@ -138,10 +139,8 @@ class KDIQuantizer(TransformerMixin, BaseEstimator):
             elif self.strategy == "kdiquantile":
                 quantiles = np.linspace(0, 1, n_bins[jj] + 1)
                 kdier = KDITransformer().fit(column.reshape(-1, 1))               
-                bin_edges[jj] = kdier.inverse_transform(quantiles.reshape(-1, 1))
+                bin_edges[jj] = kdier.inverse_transform(quantiles.reshape(-1, 1)).ravel()
             elif self.strategy == "kmeans":
-                from ..cluster import KMeans  # fixes import loops
-
                 # Deterministic initialization with uniform spacing
                 uniform_edges = np.linspace(col_min, col_max, n_bins[jj] + 1)
                 init = (uniform_edges[1:] + uniform_edges[:-1])[:, None] * 0.5
@@ -156,6 +155,7 @@ class KDIQuantizer(TransformerMixin, BaseEstimator):
                 bin_edges[jj] = (centers[1:] + centers[:-1]) * 0.5
                 bin_edges[jj] = np.r_[col_min, bin_edges[jj], col_max]
 
+            """
             # Remove bins whose width are too small (i.e., <= 1e-8)
             if self.strategy in ("quantile", "kmeans", "kdiquantile"):
                 mask = np.ediff1d(bin_edges[jj], to_begin=np.inf) > 1e-8
@@ -167,6 +167,7 @@ class KDIQuantizer(TransformerMixin, BaseEstimator):
                         "decreasing the number of bins." % jj
                     )
                     n_bins[jj] = len(bin_edges[jj]) - 1
+            """
 
         self.bin_edges_ = bin_edges
         self.n_bins_ = n_bins

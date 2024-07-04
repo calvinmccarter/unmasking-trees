@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-#import ot as pot
+import ot as pot
 
 import time
 import os

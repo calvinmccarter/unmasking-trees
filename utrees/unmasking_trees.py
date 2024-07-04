@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 
+from sklearn.base import BaseEstimator
 from sklearn.utils import check_random_state
 from sklearn.preprocessing import LabelEncoder
 
@@ -14,7 +15,7 @@ from utrees.kdi_quantizer import KDIQuantizer
 XGBOOST_DEFAULT_KWARGS = {
     'tree_method' : 'hist',
     'verbosity' : 1,
-    'objective' : 'binary:logistic', # one-vs-rest for multiclass
+    'objective' : 'multi:softprob',
 }
 
 
@@ -55,7 +56,7 @@ def top_p_sampling(n_bins, probs, rng, top_p):
     return chosen
 
 
-class UnmaskingTrees:
+class UnmaskingTrees(BaseEstimator):
     """Performs generative modeling and multiple imputation on tabular data.
     
     This method generates training data by iteratively masking samples,
@@ -68,13 +69,17 @@ class UnmaskingTrees:
         This allows modeling feature distributions with multiple modes.
 
     duplicate_K : int > 0
-        Number of new training samples (with random masking order) per actual sample.
+        Number of random masking orders per actual sample.
+        The training dataset will be of size (n_samples * n_dims * duplicate_K, n_dims).
 
     top_p : 0 < float <= 1
-        Nucleus sampling parameter. Smaller number produces less noisy generations.
+        Nucleus sampling parameter for inference. Smaller number produces less noisy generations.
 
     xgboost_kwargs : dict
         Arguments for XGBoost classifier.
+
+    strategy : 'kdiquantile', 'quantile', 'uniform', or 'kmeans'
+        The quantization strategy for discretizing continuous features.
 
     random_state : int, RandomState instance or None, default=None
         Determines random number generation.
@@ -82,13 +87,19 @@ class UnmaskingTrees:
 
     Attributes
     ----------
-    xgbers_ : list of XGBClassifier
+    trees_ : list of XGBClassifier
         Fitted XGBoost models.
 
-    quantize_cols_ : list of bool
+    constant_vals_ : list of float or None, with length n_dims
+        Gives the values of constant features, or None otherwise.
+
+    constant_encs_ : list of int or None, with length n_dims
+        Gives the encodings of constant features after preprocessing, or None otherwise.
+
+    quantize_cols_ : list of bool, with length n_dims
         Whether to apply (and un-apply) discretization to each feature.
 
-    quantizers_ : list of KDIQuantizer or LabelEncoder
+    encoders_ : list of (KDIQuantizer, LabelEncoder) or LabelEncoder
         Preprocessors for each feature.
 
     xgboost_kwargs_ : 
@@ -100,10 +111,11 @@ class UnmaskingTrees:
     """
     def __init__(
         self,
-        n_bins: int = 5,
+        n_bins: int = 10,
         duplicate_K: int = 50,
         top_p: float = 0.9,
         xgboost_kwargs: dict = {},
+        strategy: str = 'quantile',
         random_state = None,
     ):
         self.n_bins = n_bins
@@ -111,16 +123,20 @@ class UnmaskingTrees:
         self.top_p = top_p
         self.xgboost_kwargs_ = XGBOOST_DEFAULT_KWARGS.copy()
         self.xgboost_kwargs_.update(xgboost_kwargs)
+        self.strategy = strategy
         self.random_state = random_state
 
         assert 2 <= n_bins
         assert 1 <= duplicate_K
         assert 0 < top_p <= 1
         assert self.xgboost_kwargs_['objective'] in ('binary:logistic', 'multi:softprob')
+        assert strategy in ('kdiquantile', 'quantile', 'uniform', 'kmeans')
     
-        self.xgbers_ = None
+        self.trees_ = None
+        self.constant_vals_ = None
+        self.constant_encs_ = None  # XXX - remove me
         self.quantize_cols_ = None
-        self.quantizers_ = None
+        self.encoders_ = None
         self.X_ = None
 
     def fit(
@@ -136,7 +152,7 @@ class UnmaskingTrees:
         X : array-like of shape (n_samples, n_dims)
             Data to be modeled and imputed (possibly with np.nan).
 
-        quantize_cols : 'all', 'none', or list of bool
+        quantize_cols : 'all', 'none', or list of strs ('continuous', 'categorical', 'integer')
             Whether to apply (and un-apply) discretization to each feature.
 
         Returns
@@ -149,6 +165,19 @@ class UnmaskingTrees:
         n_samples, n_dims = X.shape
         if isinstance(quantize_cols, list):
             assert len(quantize_cols) == n_dims
+            self.quantize_cols_ = []
+            for d, elt in enumerate(quantize_cols):
+                if elt == 'continuous':
+                    self.quantize_cols_.append(False)
+                elif elt == 'categorical':
+                    self.quantize_cols_.append(True)
+                elif elt == 'integer':
+                    if len(np.unique(X[:, d])) > self.n_bins:
+                        self.quantize_cols_.append(True)
+                    else:
+                        self.quantize_cols_.append(False)
+                else:
+                    assert elt in ('continuous', 'categorical', 'integer')
             self.quantize_cols_ = quantize_cols
         elif quantize_cols == 'none':
             self.quantize_cols_ = [False] * n_dims
@@ -156,20 +185,28 @@ class UnmaskingTrees:
             self.quantize_cols_ = [True] * n_dims
         else:
             raise ValueError(f'unexpected quantize_cols: {quantize_cols}')
-
-        self.X_ = X.copy()
         
-        self.quantizers_ = []       
+        # Find features with constant vals, to be unmasked before training and inference
+        self.constant_vals_ = []
+        for d in range(n_dims):
+            if len(np.unique(X[:, d])) == 1:
+                self.constant_vals_.append(np.unique(X[:, d]).item())
+            else:
+                self.constant_vals_.append(None)
+
+        # Fit encoders
+        self.encoders_ = []
         for d in range(n_dims):
             if self.quantize_cols_[d]:
                 curq = KDIQuantizer(
-                    n_bins=self.n_bins, encode='ordinal', strategy='quantile')
+                    n_bins=self.n_bins, encode='ordinal', strategy=self.strategy)
                 curq.fit(X[~np.isnan(X[:, d]), d:d+1])
             else:
                 curq = LabelEncoder()
                 curq.fit(X[~np.isnan(X[:, d]), d])
-            self.quantizers_.append(curq)
+            self.encoders_.append(curq)
 
+        # Generate training data
         X_train = []
         Y_train = []
         for dupix in range(self.duplicate_K):
@@ -188,17 +225,49 @@ class UnmaskingTrees:
         X_train = np.concatenate(X_train, axis=0)
         Y_train = np.concatenate(Y_train, axis=0)
 
+        # Replace each KDIQuantizer with (KDIQuantizer, LabelEncoder) tuple,
+        # because we need to remove bins which are empty before giving to xgboost.
+        for d in range(n_dims):
+            if self.quantize_cols_[d]:
+                train_ixs = ~np.isnan(Y_train[:, d])
+                cur_q = self.encoders_[d]
+                curY_train = cur_q.transform(Y_train[train_ixs, d:d+1])
+                cur_le = LabelEncoder().fit(curY_train.ravel())
+                self.encoders_[d] = (cur_q, cur_le)
+
+        # XXX
+        """
+        # Find features with constant encodings, to be unmasked before training and inference
+        for d in range(n_dims):
+            if self.quantize_cols_[d]:
+        """
+
+        # Unmask constant-value columns before training
+        for d in range(n_dims):
+            if self.constant_vals_[d] is not None:
+                X_train[:, d] = self.constant_vals_[d]
+
+        # Fit trees
         self.trees_ = []
         for d in range(n_dims):
-            xgber = xgb.XGBClassifier(tree_method="hist")
+            if self.constant_vals_[d] is not None:
+                self.trees_.append(None)
+                continue
+
+            xgber = xgb.XGBClassifier(**self.xgboost_kwargs_)
             train_ixs = ~np.isnan(Y_train[:, d])
             if self.quantize_cols_[d]:
-                curY_train = self.quantizers_[d].transform(Y_train[train_ixs, d:d+1])
+                (cur_q, cur_le) = self.encoders_[d]
+                # XXX astype(float) not needed?
+                curY_train = cur_le.transform(cur_q.transform(Y_train[train_ixs, d:d+1]).ravel()).astype(float)
             else:
-                curY_train = self.quantizers_[d].transform(Y_train[train_ixs, d])
+                curY_train = self.encoders_[d].transform(Y_train[train_ixs, d])
             curX_train = X_train[train_ixs, :] 
             xgber.fit(curX_train, curY_train)
             self.trees_.append(xgber)
+
+        self.X_ = X.copy()
+
         return self
 
     def generate(
@@ -218,6 +287,7 @@ class UnmaskingTrees:
         X : np.ndarray of size (n_generate, n_dims)
             Generated data.
         """
+        """
         n_samples, n_dims = self.X_.shape
         rng = check_random_state(self.random_state)
 
@@ -228,15 +298,25 @@ class UnmaskingTrees:
             for dix in range(n_dims):
                 unmask_ix = unmask_ixs[n, dix]
                 pred_probas = self.trees_[unmask_ix].predict_proba(X[[n], :])
-                cur_quant = self.quantizers_[unmask_ix]
                 if self.quantize_cols_[unmask_ix]:
-                    pred_quant = top_p_sampling(cur_quant.n_bins_[0], pred_probas, rng, self.top_p)
-                    pred_val = cur_quant.inverse_transform_sample(pred_quant.reshape(1, 1))
+                    (cur_q, cur_le) = self.encoders_[unmask_ix]
+                    pred_quant = top_p_sampling(len(cur_le.classes_), pred_probas, rng, self.top_p)
+                    pred_quant = cur_le.inverse_transform(pred_quant.reshape(1,))
+                    pred_val = cur_q.inverse_transform_sample(pred_quant.reshape(1, 1))
                 else:
+                    cur_quant = self.encoders_[unmask_ix]
                     pred_quant = top_p_sampling(len(cur_quant.classes_), pred_probas, rng, self.top_p)
                     pred_val = cur_quant.inverse_transform(pred_quant.reshape(1,))
                 X[n, unmask_ix] = pred_val.item()
         return X
+        """
+        _, n_dims = self.X_.shape
+        X = np.full(fill_value=np.nan, shape=(n_generate, n_dims))
+        for d in range(n_dims):
+            if self.constant_vals_[d] is not None:
+                X[:, d] = self.constant_vals_[d]
+        genX = self.impute(n_impute=1, X=X)[0, :, :]
+        return genX
 
     def impute(
         self,
@@ -260,9 +340,13 @@ class UnmaskingTrees:
             Imputed data.
         """
         if X is None:
-            X = self.X_
+            X = self.X_.copy()
         (n_samples, n_dims) = X.shape
         rng = check_random_state(self.random_state)
+
+        for d in range(n_dims):
+            if self.constant_vals_[d] is not None:
+                X[np.isnan(X[:, d]), d] = self.constant_vals_[d]
 
         imputedX = np.repeat(X[np.newaxis, :, :], repeats=n_impute, axis=0) # (n_impute, n_samples, n_dims)           
         for n in range(n_samples):
@@ -274,11 +358,13 @@ class UnmaskingTrees:
                 for dix in range(n_to_unmask):
                     unmask_ix = unmask_ixs[kix, dix]
                     pred_probas = self.trees_[unmask_ix].predict_proba(imputedX[kix,[n], :])
-                    cur_quant = self.quantizers_[unmask_ix]
                     if self.quantize_cols_[unmask_ix]:
-                        pred_quant = top_p_sampling(cur_quant.n_bins_[0], pred_probas, rng, self.top_p)
-                        pred_val = cur_quant.inverse_transform_sample(pred_quant.reshape(1, 1))
+                        (cur_q, cur_le) = self.encoders_[unmask_ix]
+                        pred_quant = top_p_sampling(len(cur_le.classes_), pred_probas, rng, self.top_p)
+                        pred_quant = cur_le.inverse_transform(pred_quant.reshape(1,))
+                        pred_val = cur_q.inverse_transform_sample(pred_quant.reshape(1, 1))
                     else:
+                        cur_quant = self.encoders_[unmask_ix]
                         pred_quant = top_p_sampling(len(cur_quant.classes_), pred_probas, rng, self.top_p)
                         pred_val = cur_quant.inverse_transform(pred_quant.reshape(1,))
                     imputedX[kix, n, unmask_ix] = pred_val.item()
