@@ -93,9 +93,6 @@ class UnmaskingTrees(BaseEstimator):
     constant_vals_ : list of float or None, with length n_dims
         Gives the values of constant features, or None otherwise.
 
-    constant_encs_ : list of int or None, with length n_dims
-        Gives the encodings of constant features after preprocessing, or None otherwise.
-
     quantize_cols_ : list of bool, with length n_dims
         Whether to apply (and un-apply) discretization to each feature.
 
@@ -111,11 +108,11 @@ class UnmaskingTrees(BaseEstimator):
     """
     def __init__(
         self,
-        n_bins: int = 10,
+        n_bins: int = 20,
         duplicate_K: int = 50,
         top_p: float = 0.9,
         xgboost_kwargs: dict = {},
-        strategy: str = 'quantile',
+        strategy: str = 'kdiquantile',
         random_state = None,
     ):
         self.n_bins = n_bins
@@ -134,7 +131,6 @@ class UnmaskingTrees(BaseEstimator):
     
         self.trees_ = None
         self.constant_vals_ = None
-        self.constant_encs_ = None  # XXX - remove me
         self.quantize_cols_ = None
         self.encoders_ = None
         self.X_ = None
@@ -189,8 +185,9 @@ class UnmaskingTrees(BaseEstimator):
         # Find features with constant vals, to be unmasked before training and inference
         self.constant_vals_ = []
         for d in range(n_dims):
-            if len(np.unique(X[:, d])) == 1:
-                self.constant_vals_.append(np.unique(X[:, d]).item())
+            col_d = X[~np.isnan(X[:, d]), d]
+            if len(np.unique(col_d)) == 1:
+                self.constant_vals_.append(np.unique(col_d).item())
             else:
                 self.constant_vals_.append(None)
 
@@ -218,7 +215,7 @@ class UnmaskingTrees(BaseEstimator):
                     victim_ix = mask_ixs[n, d]
                     if fuller_X[victim_ix] != np.nan:
                         emptier_X = fuller_X.copy()
-                        emptier_X[mask_ixs[n, d]] = np.nan
+                        emptier_X[victim_ix] = np.nan
                         X_train.append(emptier_X.reshape(1, -1))
                         Y_train.append(fuller_X.reshape(1, -1))
                         fuller_X = emptier_X
@@ -235,13 +232,6 @@ class UnmaskingTrees(BaseEstimator):
                 cur_le = LabelEncoder().fit(curY_train.ravel())
                 self.encoders_[d] = (cur_q, cur_le)
 
-        # XXX
-        """
-        # Find features with constant encodings, to be unmasked before training and inference
-        for d in range(n_dims):
-            if self.quantize_cols_[d]:
-        """
-
         # Unmask constant-value columns before training
         for d in range(n_dims):
             if self.constant_vals_[d] is not None:
@@ -254,7 +244,6 @@ class UnmaskingTrees(BaseEstimator):
                 self.trees_.append(None)
                 continue
 
-            xgber = xgb.XGBClassifier(**self.xgboost_kwargs_)
             train_ixs = ~np.isnan(Y_train[:, d])
             if self.quantize_cols_[d]:
                 (cur_q, cur_le) = self.encoders_[d]
@@ -262,6 +251,10 @@ class UnmaskingTrees(BaseEstimator):
             else:
                 curY_train = self.encoders_[d].transform(Y_train[train_ixs, d])
             curX_train = X_train[train_ixs, :] 
+            my_xgboost_kwargs = dict(**self.xgboost_kwargs_)
+            if len(np.unique(curY_train)) == 2:
+                my_xgboost_kwargs['objective'] = 'binary:logistic'
+            xgber = xgb.XGBClassifier(**my_xgboost_kwargs)
             xgber.fit(curX_train, curY_train)
             self.trees_.append(xgber)
 
