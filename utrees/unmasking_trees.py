@@ -258,8 +258,7 @@ class UnmaskingTrees(BaseEstimator):
             train_ixs = ~np.isnan(Y_train[:, d])
             if self.quantize_cols_[d]:
                 (cur_q, cur_le) = self.encoders_[d]
-                # XXX astype(float) not needed?
-                curY_train = cur_le.transform(cur_q.transform(Y_train[train_ixs, d:d+1]).ravel()).astype(float)
+                curY_train = cur_le.transform(cur_q.transform(Y_train[train_ixs, d:d+1]).ravel())
             else:
                 curY_train = self.encoders_[d].transform(Y_train[train_ixs, d])
             curX_train = X_train[train_ixs, :] 
@@ -286,29 +285,6 @@ class UnmaskingTrees(BaseEstimator):
         -------
         X : np.ndarray of size (n_generate, n_dims)
             Generated data.
-        """
-        """
-        n_samples, n_dims = self.X_.shape
-        rng = check_random_state(self.random_state)
-
-        X = np.full(fill_value=np.nan, shape=(n_generate, n_dims))
-        unmask_ixs = np.repeat(np.arange(n_dims)[np.newaxis, :], n_samples, axis=0)  # (n_generate, n_dims)
-        unmask_ixs = np.apply_along_axis(rng.permutation, axis=1, arr=unmask_ixs) # (n_generate, n_dims)
-        for n in range(n_generate):
-            for dix in range(n_dims):
-                unmask_ix = unmask_ixs[n, dix]
-                pred_probas = self.trees_[unmask_ix].predict_proba(X[[n], :])
-                if self.quantize_cols_[unmask_ix]:
-                    (cur_q, cur_le) = self.encoders_[unmask_ix]
-                    pred_quant = top_p_sampling(len(cur_le.classes_), pred_probas, rng, self.top_p)
-                    pred_quant = cur_le.inverse_transform(pred_quant.reshape(1,))
-                    pred_val = cur_q.inverse_transform_sample(pred_quant.reshape(1, 1))
-                else:
-                    cur_quant = self.encoders_[unmask_ix]
-                    pred_quant = top_p_sampling(len(cur_quant.classes_), pred_probas, rng, self.top_p)
-                    pred_val = cur_quant.inverse_transform(pred_quant.reshape(1,))
-                X[n, unmask_ix] = pred_val.item()
-        return X
         """
         _, n_dims = self.X_.shape
         X = np.full(fill_value=np.nan, shape=(n_generate, n_dims))
@@ -346,6 +322,7 @@ class UnmaskingTrees(BaseEstimator):
 
         for d in range(n_dims):
             if self.constant_vals_[d] is not None:
+                # Only replace nans with constant vals, because this is impute, ya know
                 X[np.isnan(X[:, d]), d] = self.constant_vals_[d]
 
         imputedX = np.repeat(X[np.newaxis, :, :], repeats=n_impute, axis=0) # (n_impute, n_samples, n_dims)           
