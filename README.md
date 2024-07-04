@@ -2,9 +2,9 @@
 
 [![PyPI version](https://badge.fury.io/py/utrees.svg)](https://badge.fury.io/py/utrees)
 
-UnmaskingTrees is a method for tabular data generation and imputation. It's an order-agnostic autoregressive diffusion model, wherein a training dataset is contruscted by incrementally masking features in random order. Per-feature gradient-boosted trees are then trained to unmask each feature. To better model conditional distributions which are multi-modal ("modal" as in "mode", not as in "modality"), we by default discretize continuous features into bins. 
+UnmaskingTrees is a method for tabular data generation and imputation. It's an order-agnostic autoregressive diffusion model, wherein a training dataset is constructed by incrementally masking features in random order. Per-feature gradient-boosted trees are then trained to unmask each feature. To better model conditional distributions which are multi-modal ("modal" as in "modes", not as in "modalities"), we by default discretize continuous features into bins. 
 
-At inference time, these trees are applied in random order. For generation tasks, these are applied to all features; for imputation tasks, these are applied to features with missing values. This method injects randomness in both data generation and multiple-imputation, from three sources. First, we randomly generate the order over features in which we apply the tree models. Second, we do not "greedily decode" the most likely bin, but instead sample according to predicted probabilities, via nucleus sampling. Third, for continuous features, having sampled a particular bin, we sample from within the bin, treating it as a uniform distribution.
+At inference time, these trees are applied in random order. For generation tasks, these are applied to all features; for imputation tasks, these are applied to features with missing values. In contrast to standard diffusion models which inject randomness via Gaussian sampling at the beginning of the reverse process, this method injects randomness in both data generation and multiple-imputation, from three sources. First, we randomly generate the order over features in which we apply the tree models. Second, we do not "greedily decode" the most likely bin, but instead sample according to predicted probabilities, via nucleus sampling. Third, for continuous features, having sampled a particular bin, we sample from within the bin, treating it as a uniform distribution.
 
 ## Installation 
 
@@ -25,7 +25,7 @@ pytest
 
 ### Synthetic data generation
 
-You can fit `utrees.UnmaskingTrees` the way you would an sklearn model, with the added option that you can call `fit` with `quantize_cols`, a list of bools to specify which columns are continuous (and therefore need to be discretized). By default, all columns are assumed to contain continuous features.
+You can fit `utrees.UnmaskingTrees` the way you would an sklearn model, with the added option that you can call `fit` with `quantize_cols`, a list to specify which columns are continuous (and therefore need to be discretized). By default, all columns are assumed to contain continuous features.
 
 ```
 import numpy as np
