@@ -11,12 +11,14 @@ from sklearn.neighbors import KernelDensity
 
 from utrees import UnmaskingTrees
 
+CREATE_PLOTS = True
 
 @pytest.mark.parametrize("n_bins, duplicate_K, top_p, min_score", [
     (5, 10, 0.9, -2.),
     (5, 10, 1.0, -2.),
     (10, 10, 0.9, -2.),
     (5, 50, 0.9, -2.),
+    (20, 50, 0.9, -1.5),
 ])
 def test_moons_generate(n_bins, duplicate_K, top_p, min_score):
     n_upper = 100
@@ -34,6 +36,11 @@ def test_moons_generate(n_bins, duplicate_K, top_p, min_score):
     )
     utree.fit(data)
     newdata = utree.generate(n_generate=n_generate)
+    if CREATE_PLOTS:
+        import matplotlib.pyplot as plt
+        plt.figure()
+        plt.scatter(newdata[:, 0], newdata[:, 1]);
+        plt.savefig(f'test_moons_generate-{n_bins}-{duplicate_K}-{top_p:.2f}.pdf')
     assert newdata.shape == (n_generate, 2)
 
     kde = KernelDensity(kernel='gaussian', bandwidth=0.2).fit(data)
@@ -46,10 +53,12 @@ def test_moons_generate(n_bins, duplicate_K, top_p, min_score):
     (5, 10, 1.0, -2., 1),
     (10, 10, 0.9, -2., 1),
     (5, 50, 0.9, -2., 1),
+    (20, 50, 0.9, -1.5, 1),
     (5, 10, 0.9, -2., 3),
     (5, 10, 1.0, -2., 3),
     (10, 10, 0.9, -2., 3),
     (5, 50, 0.9, -2., 3),
+    (20, 50, 0.9, -1.5, 3),
 ])
 def test_moons_impute(n_bins, duplicate_K, top_p, min_score, k):
     n_upper = 100
@@ -79,6 +88,11 @@ def test_moons_impute(n_bins, duplicate_K, top_p, min_score, k):
         np.testing.assert_equal(imputedXcur[nannystate], X[nannystate])
         scores = kde.score_samples(imputedXcur)
         assert scores.mean() >= min_score
+    if CREATE_PLOTS:
+        import matplotlib.pyplot as plt
+        plt.figure()
+        plt.scatter(imputedX[0, :, 0], imputedX[0, :, 1]);
+        plt.savefig(f'test_moons_impute-{n_bins}-{duplicate_K}-{top_p:.2f}.pdf')
 
     # Tests providing data to impute
     imputedX = utree.impute(n_impute=k, X=data4impute)
