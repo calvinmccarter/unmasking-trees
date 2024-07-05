@@ -2,9 +2,15 @@
 
 [![PyPI version](https://badge.fury.io/py/utrees.svg)](https://badge.fury.io/py/utrees)
 
-UnmaskingTrees is a method for tabular data generation and imputation. It's an order-agnostic autoregressive diffusion model, wherein a training dataset is constructed by incrementally masking features in random order. Per-feature gradient-boosted trees are then trained to unmask each feature. To better model conditional distributions which are multi-modal ("modal" as in "modes", not as in "modalities"), we by default discretize continuous features into bins. 
+UnmaskingTrees is a method for tabular data generation and imputation. It's an order-agnostic autoregressive diffusion model, wherein a training dataset is constructed by incrementally masking features in random order. Per-feature gradient-boosted trees are then trained to unmask each feature. 
 
-At inference time, these trees are applied in random order. For generation tasks, these are applied to all features; for imputation tasks, these are applied to features with missing values. In contrast to standard diffusion models which inject randomness via Gaussian sampling at the beginning of the reverse process, this method injects randomness in both data generation and multiple-imputation, from three sources. First, we randomly generate the order over features in which we apply the tree models. Second, we do not "greedily decode" the most likely bin, but instead sample according to predicted probabilities, via nucleus sampling. Third, for continuous features, having sampled a particular bin, we sample from within the bin, treating it as a uniform distribution.
+To better model conditional distributions which are multi-modal ("modal" as in "modes", not as in "modalities"), we by default discretize continuous features into `n_bins` bins. You can customize this, via the `quantize_cols` parameter in the `fit` method. Provide a list of length `n_dims`, with values in `('continuous', 'categorical', 'integer')`. Given `categorical` it skips quantization of that feature; given `integer` it only quantizes if the number of unique values > `n_bins`.
+
+
+<figure>
+  <figcaption><i>Here's how well it works on the Two Moons synthetic dataset, compared to ForestDiffusion:</i></figcaption>
+  <img src="moons-demo.png" alt="drawing" width="600"/>
+</figure>
 
 ## Installation 
 
@@ -22,6 +28,8 @@ pytest
 ```
 
 ## Usage
+
+Check out [this notebook](https://github.com/calvinmccarter/unmasking-trees/blob/master/moons-demo.ipynb) with the Two Moons example, or [this one](https://github.com/calvinmccarter/unmasking-trees/blob/master/iris-demo.ipynb) with the Iris dataset.
 
 ### Synthetic data generation
 
@@ -66,6 +74,7 @@ imputeddata = utree.impute(n_impute=5, X=data4impute)  # size (5, 200, 2)
 - duplicate_K: Number of random masking orders per actual sample. The training dataset will be of size `(n_samples * n_dims * duplicate_K, n_dims)`.
 - top_p: Nucleus sampling parameter for inference.
 - xgboost_kwargs: dict to pass to XGBClassifier.
+- strategy: how to quantize continuous features ('kdiquantile', 'quantile', 'uniform', or 'kmeans').
 - random_state: controls randomness.
 
 ## Citing this method
