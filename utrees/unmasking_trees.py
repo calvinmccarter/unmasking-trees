@@ -1,4 +1,5 @@
 from typing import Union, Optional
+from copy import deepcopy
 import warnings
 
 import numpy as np
@@ -93,6 +94,9 @@ class UnmaskingTrees(BaseEstimator):
     constant_vals_ : list of float or None, with length n_dims
         Gives the values of constant features, or None otherwise.
 
+    quantize_cols : str or list of strs
+        Saved user-provided quantize_cols input.
+
     quantize_cols_ : list of bool, with length n_dims
         Whether to apply (and un-apply) discretization to each feature.
 
@@ -164,9 +168,9 @@ class UnmaskingTrees(BaseEstimator):
             self.quantize_cols_ = []
             for d, elt in enumerate(quantize_cols):
                 if elt == 'continuous':
-                    self.quantize_cols_.append(False)
-                elif elt == 'categorical':
                     self.quantize_cols_.append(True)
+                elif elt == 'categorical':
+                    self.quantize_cols_.append(False)
                 elif elt == 'integer':
                     if len(np.unique(X[:, d])) > self.n_bins:
                         self.quantize_cols_.append(True)
@@ -174,13 +178,13 @@ class UnmaskingTrees(BaseEstimator):
                         self.quantize_cols_.append(False)
                 else:
                     assert elt in ('continuous', 'categorical', 'integer')
-            self.quantize_cols_ = quantize_cols
         elif quantize_cols == 'none':
             self.quantize_cols_ = [False] * n_dims
         elif quantize_cols == 'all':
             self.quantize_cols_ = [True] * n_dims
         else:
             raise ValueError(f'unexpected quantize_cols: {quantize_cols}')
+        self.quantize_cols = deepcopy(quantize_cols)
         
         # Find features with constant vals, to be unmasked before training and inference
         self.constant_vals_ = []

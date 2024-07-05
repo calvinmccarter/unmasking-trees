@@ -8,7 +8,7 @@ def readme():
 
 configuration = {
     "name": "utrees",
-    "version": "0.1.1",
+    "version": "0.1.3",
     "description": "Unmasking trees for tabular data generation and imputation",
     "long_description": readme(),
     "classifiers": [
