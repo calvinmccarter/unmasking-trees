@@ -77,9 +77,13 @@ imputeddata = utree.impute(n_impute=5, X=data4impute)  # size (5, 200, 2)
 - strategy: how to quantize continuous features ('kdiquantile', 'quantile', 'uniform', or 'kmeans').
 - random_state: controls randomness.
 
+
+<!---
+
 ## Citing this method
 
 Please consider citing UnmaskingTrees as TODO. 
 
 Also, please consider citing ForestDiffusion ([code](https://github.com/SamsungSAILMontreal/ForestDiffusion) and [paper](https://arxiv.org/abs/2309.09968)), which this work builds on.
 
+--->
