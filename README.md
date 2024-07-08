@@ -2,7 +2,7 @@
 
 [![PyPI version](https://badge.fury.io/py/utrees.svg)](https://badge.fury.io/py/utrees)
 
-UnmaskingTrees is a method for tabular data generation and imputation. It's an order-agnostic autoregressive diffusion model, wherein a training dataset is constructed by incrementally masking features in random order. Per-feature gradient-boosted trees are then trained to unmask each feature. 
+UnmaskingTrees is a method for tabular data generation and imputation. It's an order-agnostic autoregressive diffusion model, wherein a training dataset is constructed by incrementally masking features in random order. Per-feature gradient-boosted trees are then trained to unmask each feature. Read more about it in my [blog post](https://calvinmccarter.substack.com/p/unmasking-trees-for-tabular-data)!
 
 To better model conditional distributions which are multi-modal ("modal" as in "modes", not as in "modalities"), we by default discretize continuous features into `n_bins` bins. You can customize this, via the `quantize_cols` parameter in the `fit` method. Provide a list of length `n_dims`, with values in `('continuous', 'categorical', 'integer')`. Given `categorical` it skips quantization of that feature; given `integer` it only quantizes if the number of unique values > `n_bins`.
 
@@ -77,9 +77,13 @@ imputeddata = utree.impute(n_impute=5, X=data4impute)  # size (5, 200, 2)
 - strategy: how to quantize continuous features ('kdiquantile', 'quantile', 'uniform', or 'kmeans').
 - random_state: controls randomness.
 
+
+<!---
+
 ## Citing this method
 
 Please consider citing UnmaskingTrees as TODO. 
 
 Also, please consider citing ForestDiffusion ([code](https://github.com/SamsungSAILMontreal/ForestDiffusion) and [paper](https://arxiv.org/abs/2309.09968)), which this work builds on.
 
+--->
