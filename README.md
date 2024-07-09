@@ -78,12 +78,18 @@ imputeddata = utree.impute(n_impute=5, X=data4impute)  # size (5, 200, 2)
 - random_state: controls randomness.
 
 
-<!---
 
 ## Citing this method
 
-Please consider citing UnmaskingTrees as TODO. 
+Please consider citing the UnmaskingTrees preprint. The bibtex is:
+
+```
+@article{mccarter2024unmasking,
+  title={Unmasking Trees for Tabular Data},
+  author={McCarter, Calvin},
+  journal={arXiv preprint arXiv:2407.05593},
+  year={2024}
+}
+````
 
 Also, please consider citing ForestDiffusion ([code](https://github.com/SamsungSAILMontreal/ForestDiffusion) and [paper](https://arxiv.org/abs/2309.09968)), which this work builds on.
-
---->
