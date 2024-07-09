@@ -1,6 +1,7 @@
 # unmasking-trees 😷➡️🥳 🌲🌲🌲
 
 [![PyPI version](https://badge.fury.io/py/utrees.svg)](https://badge.fury.io/py/utrees)
+[![Downloads](https://static.pepy.tech/badge/utrees)](https://pepy.tech/project/utrees)
 
 UnmaskingTrees is a method for tabular data generation and imputation. It's an order-agnostic autoregressive diffusion model, wherein a training dataset is constructed by incrementally masking features in random order. Per-feature gradient-boosted trees are then trained to unmask each feature. Read more about it in my [blog post](https://calvinmccarter.substack.com/p/unmasking-trees-for-tabular-data)!
 
@@ -81,7 +82,7 @@ imputeddata = utree.impute(n_impute=5, X=data4impute)  # size (5, 200, 2)
 
 ## Citing this method
 
-Please consider citing the UnmaskingTrees preprint. The bibtex is:
+Please consider citing the UnmaskingTrees [arXiv preprint](https://arxiv.org/pdf/2407.05593). The bibtex is:
 
 ```
 @article{mccarter2024unmasking,
