@@ -85,8 +85,12 @@ def test_moons_impute(n_bins, duplicate_K, top_p, min_score, k):
     nannystate = ~np.isnan(X)
     for kk in range(k):
         imputedXcur = imputedX[kk, :, :]
+        # Assert observed data is unchanged
         np.testing.assert_equal(imputedXcur[nannystate], X[nannystate])
+        # Assert all NaNs removed
+        assert np.isnan(imputedXcur).sum() == 0
         scores = kde.score_samples(imputedXcur)
+        # Assert imputed data is close to observed data distribution
         assert scores.mean() >= min_score
     if CREATE_PLOTS:
         import matplotlib.pyplot as plt
