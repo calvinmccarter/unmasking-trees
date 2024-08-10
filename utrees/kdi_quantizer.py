@@ -31,7 +31,7 @@ class KDIQuantizer(TransformerMixin, BaseEstimator):
     _parameter_constraints: dict = {
         "n_bins": [Interval(Integral, 2, None, closed="left"), "array-like"],
         "encode": [StrOptions({"ordinal"})],
-        "strategy": [StrOptions({"uniform", "quantile", "kmeans", "kdiquantile"})],
+        "strategy": [StrOptions({"uniform", "quantile", "kmeans", "kdiquantile", "treeffuser"})],
         "dtype": [Options(type, {np.float64, np.float32}), None],
         "subsample": [Interval(Integral, 1, None, closed="left"), None],
         "random_state": ["random_state"],
@@ -49,6 +49,8 @@ class KDIQuantizer(TransformerMixin, BaseEstimator):
     ):
         self.n_bins = n_bins
         self.encode = encode
+        if strategy == "treeffuser":
+            strategy = "kdiquantile"
         self.strategy = strategy
         self.dtype = dtype
         self.subsample = subsample

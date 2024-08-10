@@ -80,8 +80,9 @@ class UnmaskingTrees(BaseEstimator):
     xgboost_kwargs : dict
         Arguments for XGBoost classifier.
 
-    strategy : 'kdiquantile', 'quantile', 'uniform', or 'kmeans'
+    strategy : 'kdiquantile', 'quantile', 'uniform', 'kmeans', or 'treeffuser'
         The quantization strategy for discretizing continuous features.
+        If 'treeffuser', does not quantize continuous features, instead using diffusion.
 
     random_state : int, RandomState instance or None, default=None
         Determines random number generation.
@@ -132,7 +133,7 @@ class UnmaskingTrees(BaseEstimator):
         assert 1 <= duplicate_K
         assert 0 < top_p <= 1
         assert self.xgboost_kwargs_['objective'] in ('binary:logistic', 'multi:softprob')
-        assert strategy in ('kdiquantile', 'quantile', 'uniform', 'kmeans')
+        assert strategy in ('kdiquantile', 'quantile', 'uniform', 'kmeans', 'treeffuser')
     
         self.trees_ = None
         self.constant_vals_ = None
@@ -224,17 +225,6 @@ class UnmaskingTrees(BaseEstimator):
                         X_train.append(emptier_X.reshape(1, -1))
                         Y_train.append(fuller_X.reshape(1, -1))
                         fuller_X = emptier_X
-        """
-        for dupix in range(self.duplicate_K):
-            for n in range(n_samples):
-                for num_masked in range(n_dims):
-                    masked = rng.choice(n_dims, num_masked, replace=False)
-                    emptier_X = X[n, :].copy()
-                    emptier_X[masked] = np.nan
-                    if not np.array_equal(emptier_X, X[n, :]):
-                        X_train.append(emptier_X.reshape(1, -1))
-                        Y_train.append(X[n, :].reshape(1, -1))
-        """
         X_train = np.concatenate(X_train, axis=0)
         Y_train = np.concatenate(Y_train, axis=0)
 
@@ -259,37 +249,27 @@ class UnmaskingTrees(BaseEstimator):
             if self.constant_vals_[d] is not None:
                 self.trees_.append(None)
                 continue
-            """
-            train_ixs = ~np.isnan(Y_train[:, d])
-            if self.quantize_cols_[d]:
-                (cur_q, cur_le) = self.encoders_[d]
-                curY_train = cur_le.transform(cur_q.transform(Y_train[train_ixs, d:d+1]).ravel())
-            else:
-                curY_train = self.encoders_[d].transform(Y_train[train_ixs, d])
-            curX_train = X_train[train_ixs, :] 
-            my_xgboost_kwargs = dict(**self.xgboost_kwargs_)
-            if len(np.unique(curY_train)) == 2:
-                my_xgboost_kwargs['objective'] = 'binary:logistic'
-            xgber = xgb.XGBClassifier(**my_xgboost_kwargs)
-            xgber.fit(curX_train, curY_train)
-            self.trees_.append(xgber)
-            """
             train_ixs = ~np.isnan(Y_train[:, d])
             curX_train = X_train[train_ixs, :]
-            curY_train = Y_train[train_ixs, d]
-            if self.quantize_cols_[d]:
-                xgber = Treeffuser(seed=self.random_state)
-                xgber.fit(curX_train.astype(np.float32), curY_train.astype(np.float32))
+            if self.quantize_cols_[d] and self.strategy == 'treeffuser':
+                tfser = Treeffuser(seed=self.random_state)
+                curY_train = Y_train[train_ixs, d]
+                tfser.fit(curX_train.astype(np.float32), curY_train.astype(np.float32))
+                self.trees_.append(tfser)
             else:
+                if self.quantize_cols_[d]:
+                    (cur_q, cur_le) = self.encoders_[d]
+                    curY_train = cur_le.transform(cur_q.transform(Y_train[train_ixs, d:d+1]).ravel())
+                else:
+                    curY_train = self.encoders_[d].transform(Y_train[train_ixs, d])
+                curX_train = X_train[train_ixs, :]
                 my_xgboost_kwargs = dict(**self.xgboost_kwargs_)
                 if len(np.unique(curY_train)) == 2:
                     my_xgboost_kwargs['objective'] = 'binary:logistic'
                 xgber = xgb.XGBClassifier(**my_xgboost_kwargs)
                 xgber.fit(curX_train, curY_train)
-            self.trees_.append(xgber)
-
+                self.trees_.append(xgber)
         self.X_ = X.copy()
-
         return self
 
     def generate(
@@ -357,26 +337,19 @@ class UnmaskingTrees(BaseEstimator):
             for kix in range(n_impute):
                 for dix in range(n_to_unmask):
                     unmask_ix = unmask_ixs[kix, dix]
-                    """
-                    pred_probas = self.trees_[unmask_ix].predict_proba(imputedX[kix,[n], :])
-                    if self.quantize_cols_[unmask_ix]:
-                        (cur_q, cur_le) = self.encoders_[unmask_ix]
-                        pred_quant = top_p_sampling(len(cur_le.classes_), pred_probas, rng, self.top_p)
-                        pred_quant = cur_le.inverse_transform(pred_quant.reshape(1,))
-                        pred_val = cur_q.inverse_transform_sample(pred_quant.reshape(1, 1))
-                    else:
-                        cur_quant = self.encoders_[unmask_ix]
-                        pred_quant = top_p_sampling(len(cur_quant.classes_), pred_probas, rng, self.top_p)
-                        pred_val = cur_quant.inverse_transform(pred_quant.reshape(1,))
-                    imputedX[kix, n, unmask_ix] = pred_val.item()
-                    """
-                    if self.quantize_cols_[unmask_ix]:
+                    if self.quantize_cols_[unmask_ix] and self.strategy == 'treeffuser':
                         pred_val = self.trees_[unmask_ix].sample(imputedX[kix,[n], :].astype(np.float32), n_samples=1)
                     else:
                         pred_probas = self.trees_[unmask_ix].predict_proba(imputedX[kix,[n], :])
-                        cur_quant = self.encoders_[unmask_ix]
-                        pred_quant = top_p_sampling(len(cur_quant.classes_), pred_probas, rng, self.top_p)
-                        pred_val = cur_quant.inverse_transform(pred_quant.reshape(1,))
+                        if self.quantize_cols_[unmask_ix]:
+                            (cur_q, cur_le) = self.encoders_[unmask_ix]
+                            pred_quant = top_p_sampling(len(cur_le.classes_), pred_probas, rng, self.top_p)
+                            pred_quant = cur_le.inverse_transform(pred_quant.reshape(1,))
+                            pred_val = cur_q.inverse_transform_sample(pred_quant.reshape(1, 1))
+                        else:
+                            cur_quant = self.encoders_[unmask_ix]
+                            pred_quant = top_p_sampling(len(cur_quant.classes_), pred_probas, rng, self.top_p)
+                            pred_val = cur_quant.inverse_transform(pred_quant.reshape(1,))
                     imputedX[kix, n, unmask_ix] = pred_val.item()
 
         return imputedX
