@@ -9,6 +9,7 @@ import xgboost as xgb
 from sklearn.base import BaseEstimator
 from sklearn.utils import check_random_state
 from sklearn.preprocessing import LabelEncoder
+from treeffuser import Treeffuser
 
 from utrees.kdi_quantizer import KDIQuantizer
 
@@ -223,6 +224,17 @@ class UnmaskingTrees(BaseEstimator):
                         X_train.append(emptier_X.reshape(1, -1))
                         Y_train.append(fuller_X.reshape(1, -1))
                         fuller_X = emptier_X
+        """
+        for dupix in range(self.duplicate_K):
+            for n in range(n_samples):
+                for num_masked in range(n_dims):
+                    masked = rng.choice(n_dims, num_masked, replace=False)
+                    emptier_X = X[n, :].copy()
+                    emptier_X[masked] = np.nan
+                    if not np.array_equal(emptier_X, X[n, :]):
+                        X_train.append(emptier_X.reshape(1, -1))
+                        Y_train.append(X[n, :].reshape(1, -1))
+        """
         X_train = np.concatenate(X_train, axis=0)
         Y_train = np.concatenate(Y_train, axis=0)
 
@@ -247,7 +259,7 @@ class UnmaskingTrees(BaseEstimator):
             if self.constant_vals_[d] is not None:
                 self.trees_.append(None)
                 continue
-
+            """
             train_ixs = ~np.isnan(Y_train[:, d])
             if self.quantize_cols_[d]:
                 (cur_q, cur_le) = self.encoders_[d]
@@ -260,6 +272,20 @@ class UnmaskingTrees(BaseEstimator):
                 my_xgboost_kwargs['objective'] = 'binary:logistic'
             xgber = xgb.XGBClassifier(**my_xgboost_kwargs)
             xgber.fit(curX_train, curY_train)
+            self.trees_.append(xgber)
+            """
+            train_ixs = ~np.isnan(Y_train[:, d])
+            curX_train = X_train[train_ixs, :]
+            curY_train = Y_train[train_ixs, d]
+            if self.quantize_cols_[d]:
+                xgber = Treeffuser(seed=self.random_state)
+                xgber.fit(curX_train.astype(np.float32), curY_train.astype(np.float32))
+            else:
+                my_xgboost_kwargs = dict(**self.xgboost_kwargs_)
+                if len(np.unique(curY_train)) == 2:
+                    my_xgboost_kwargs['objective'] = 'binary:logistic'
+                xgber = xgb.XGBClassifier(**my_xgboost_kwargs)
+                xgber.fit(curX_train, curY_train)
             self.trees_.append(xgber)
 
         self.X_ = X.copy()
@@ -331,6 +357,7 @@ class UnmaskingTrees(BaseEstimator):
             for kix in range(n_impute):
                 for dix in range(n_to_unmask):
                     unmask_ix = unmask_ixs[kix, dix]
+                    """
                     pred_probas = self.trees_[unmask_ix].predict_proba(imputedX[kix,[n], :])
                     if self.quantize_cols_[unmask_ix]:
                         (cur_q, cur_le) = self.encoders_[unmask_ix]
@@ -342,4 +369,14 @@ class UnmaskingTrees(BaseEstimator):
                         pred_quant = top_p_sampling(len(cur_quant.classes_), pred_probas, rng, self.top_p)
                         pred_val = cur_quant.inverse_transform(pred_quant.reshape(1,))
                     imputedX[kix, n, unmask_ix] = pred_val.item()
+                    """
+                    if self.quantize_cols_[unmask_ix]:
+                        pred_val = self.trees_[unmask_ix].sample(imputedX[kix,[n], :].astype(np.float32), n_samples=1)
+                    else:
+                        pred_probas = self.trees_[unmask_ix].predict_proba(imputedX[kix,[n], :])
+                        cur_quant = self.encoders_[unmask_ix]
+                        pred_quant = top_p_sampling(len(cur_quant.classes_), pred_probas, rng, self.top_p)
+                        pred_val = cur_quant.inverse_transform(pred_quant.reshape(1,))
+                    imputedX[kix, n, unmask_ix] = pred_val.item()
+
         return imputedX
