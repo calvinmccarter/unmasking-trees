@@ -353,3 +353,51 @@ class UnmaskingTrees(BaseEstimator):
                     imputedX[kix, n, unmask_ix] = pred_val.item()
 
         return imputedX
+
+    def score_samples(
+        self,
+        X: np.ndarray,
+        n_evals: int = 1,
+    ):
+        """Compute the log-likelihood of each sample under the model.
+        This assumes that treeffuser is not used.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            An array of points to query.  Last dimension should match dimension
+            of training data (n_features).
+
+        n_evals : int > 0
+
+        Returns
+        -------
+        density : ndarray of shape (n_samples,)
+            Log-likelihood of each sample in `X`. These are normalized to be
+            probability densities, so values will be low for high-dimensional
+            data.
+        """
+        (n_samples, n_dims) = X.shape
+        rng = check_random_state(self.random_state)
+        assert self.strategy != 'treeffuser'
+
+        density = np.zeros((n_samples,))
+        for n in range(n_samples):
+            cur_density = np.zeros((n_evals,))
+            for k in range(n_evals):
+                eval_order = rng.permutation(n_dims)
+                for dix in range(n_dims):
+                    eval_ix = eval_order[dix]
+                    if not np.isnan(X[n, eval_ix]):
+                        evalX = X[[n], :].copy()
+                        evalX[:, eval_order[dix:]] = np.nan
+                        probas = self.trees_[eval_ix].predict_proba(evalX)[0, :]
+                        if self.quantize_cols_[eval_ix]:
+                            (cur_q, cur_le) = self.encoders_[eval_ix]
+                            true_class = cur_le.transform(cur_q.transform(X[[n], eval_ix:eval_ix+1]).ravel())
+                        else:
+                            cur_quant = self.encoders_[eval_ix]
+                            true_class = cur_quant.transform(X[[n], eval_ix:eval_ix+1]).ravel().item()
+                        cur_density[k] += np.log(probas[true_class])
+            density[n] = np.mean(cur_density)
+        return density
