@@ -393,11 +393,16 @@ class UnmaskingTrees(BaseEstimator):
                         evalX[:, eval_order[dix:]] = np.nan
                         probas = self.trees_[eval_ix].predict_proba(evalX)[0, :]
                         if self.quantize_cols_[eval_ix]:
-                            (cur_q, cur_le) = self.encoders_[eval_ix]
-                            true_class = cur_le.transform(cur_q.transform(X[[n], eval_ix:eval_ix+1]).ravel())
+                            (cur_quant, cur_le) = self.encoders_[eval_ix]
+                            true_bin = cur_quant.transform(X[[n], eval_ix:eval_ix+1]).astype(int).ravel()
+                            bin_width = (
+                                cur_quant.bin_edges_[0][true_bin+1] - cur_quant.bin_edges_[0][true_bin]
+                            ) + 1e-8
+                            true_class = cur_le.transform(true_bin).item()
+                            cur_density[k] += np.log(probas[true_class] / bin_width)
                         else:
                             cur_quant = self.encoders_[eval_ix]
                             true_class = cur_quant.transform(X[[n], eval_ix:eval_ix+1]).ravel().item()
-                        cur_density[k] += np.log(probas[true_class])
+                            cur_density[k] += np.log(probas[true_class])
             density[n] = np.mean(cur_density)
         return density
