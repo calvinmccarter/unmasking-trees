@@ -8,7 +8,7 @@ def readme():
 
 configuration = {
     "name": "utrees",
-    "version": "0.1.3",
+    "version": "0.2.0",
     "description": "Unmasking trees for tabular data generation and imputation",
     "long_description": readme(),
     "classifiers": [
@@ -39,8 +39,10 @@ configuration = {
         "kditransform",
         "numba >= 0.48",
         "numpy",
+        "pandas",
         "scikit-learn >= 0.23",
         "scipy >= 1.0",
+        "treeffuser",
         "xgboost",
     ],
     "ext_modules": [],

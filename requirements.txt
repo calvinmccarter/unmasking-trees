@@ -10,4 +10,5 @@ xgboost
 pandas
 matplotlib
 jupyterlab
+treeffuser
 seaborn
