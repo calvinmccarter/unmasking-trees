@@ -11,7 +11,7 @@ from sklearn.neighbors import KernelDensity
 
 from utrees import UnmaskingTrees
 
-CREATE_PLOTS = True
+CREATE_PLOTS = False
 
 @pytest.mark.parametrize("strategy, n_bins, duplicate_K, top_p, min_score", [
     ("kdiquantile", 5, 10, 0.9, -2.),

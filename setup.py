@@ -11,6 +11,7 @@ configuration = {
     "version": "0.2.0",
     "description": "Unmasking trees for tabular data generation and imputation",
     "long_description": readme(),
+    "long_description_content_type": "text/markdown",
     "classifiers": [
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Science/Research",
