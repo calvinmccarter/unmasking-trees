@@ -124,6 +124,7 @@ class UnmaskingTrees(BaseEstimator):
         self.n_bins = n_bins
         self.duplicate_K = duplicate_K
         self.top_p = top_p
+        self.xgboost_kwargs = xgboost_kwargs
         self.xgboost_kwargs_ = XGBOOST_DEFAULT_KWARGS.copy()
         self.xgboost_kwargs_.update(xgboost_kwargs)
         self.strategy = strategy
