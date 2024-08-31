@@ -13,14 +13,14 @@ from utrees import UnmaskingTrees
 
 CREATE_PLOTS = False
 
-@pytest.mark.parametrize("strategy, n_bins, duplicate_K, top_p, min_score", [
-    ("kdiquantile", 5, 10, 0.9, -2.),
-    ("kdiquantile", 5, 10, 1.0, -2.),
-    ("kdiquantile", 10, 10, 0.9, -2.),
-    ("kdiquantile", 5, 50, 0.9, -2.),
-    ("kdiquantile", 20, 50, 0.9, -1.5),
+@pytest.mark.parametrize("strategy, depth, duplicate_K, min_score", [
+    ("kdiquantile", 3, 10, -2.),
+    ("kdiquantile", 3, 10, -2.),
+    ("kdiquantile", 4, 10, -2.),
+    ("kdiquantile", 4, 50, -2.),
+    ("kdiquantile", 5, 50, -2.),
 ])
-def test_moons_generate(strategy, n_bins, duplicate_K, top_p, min_score):
+def test_moons_generate(strategy, depth, duplicate_K, min_score):
     n_upper = 100
     n_lower = 100
     n_generate = 123
@@ -29,10 +29,9 @@ def test_moons_generate(strategy, n_bins, duplicate_K, top_p, min_score):
         (n_upper, n_lower), shuffle=False, noise=0.1, random_state=12345)
 
     utree = UnmaskingTrees(
+        depth=depth,
         strategy=strategy,
-        n_bins=n_bins,
         duplicate_K=duplicate_K,
-        top_p=top_p,
         random_state=12345,
     )
     utree.fit(data)
@@ -41,7 +40,7 @@ def test_moons_generate(strategy, n_bins, duplicate_K, top_p, min_score):
         import matplotlib.pyplot as plt
         plt.figure()
         plt.scatter(newdata[:, 0], newdata[:, 1]);
-        plt.savefig(f'test_moons_generate-{strategy}-{n_bins}-{duplicate_K}-{top_p:.2f}.pdf')
+        plt.savefig(f'test_moons_generate-{strategy}-{depth}-{duplicate_K}.pdf')
     assert newdata.shape == (n_generate, 2)
 
     kde = KernelDensity(kernel='gaussian', bandwidth=0.2).fit(data)
@@ -49,19 +48,19 @@ def test_moons_generate(strategy, n_bins, duplicate_K, top_p, min_score):
     assert scores.mean() >= min_score
 
 
-@pytest.mark.parametrize("strategy, n_bins, duplicate_K, top_p, min_score, k", [
-    ("kdiquantile", 5, 10, 0.9, -2., 1),
-    ("kdiquantile", 5, 10, 1.0, -2., 1),
-    ("kdiquantile", 10, 10, 0.9, -2., 1),
-    ("kdiquantile", 5, 50, 0.9, -2., 1),
-    ("kdiquantile", 20, 50, 0.9, -1.5, 1),
-    ("kdiquantile", 5, 10, 0.9, -2., 3),
-    ("kdiquantile", 5, 10, 1.0, -2., 3),
-    ("kdiquantile", 10, 10, 0.9, -2., 3),
-    ("kdiquantile", 5, 50, 0.9, -2., 3),
-    ("kdiquantile", 20, 50, 0.9, -1.5, 3),
+@pytest.mark.parametrize("strategy, depth, duplicate_K, min_score, k", [
+    ("kdiquantile", 3, 10, -1.5, 1),
+    ("kdiquantile", 3, 10, -1.5, 1),
+    ("kdiquantile", 4, 10, -1.5, 1),
+    ("kdiquantile", 4, 50, -1.5, 1),
+    ("kdiquantile", 5, 50, -1.5, 1),
+    ("kdiquantile", 3, 10, -1.5, 3),
+    ("kdiquantile", 3, 10, -1.5, 3),
+    ("kdiquantile", 4, 10, -1.5, 3),
+    ("kdiquantile", 4, 50, -1.5, 3),
+    ("kdiquantile", 5, 50, -1.5, 3),
 ])
-def test_moons_impute(strategy, n_bins, duplicate_K, top_p, min_score, k):
+def test_moons_impute(strategy, depth, duplicate_K, min_score, k):
     n_upper = 100
     n_lower = 100
     n = n_upper + n_lower
@@ -72,10 +71,9 @@ def test_moons_impute(strategy, n_bins, duplicate_K, top_p, min_score, k):
     X=np.concatenate([data, data4impute], axis=0)
 
     utree = UnmaskingTrees(
+        depth=depth,
         strategy=strategy,
-        n_bins=n_bins,
         duplicate_K=duplicate_K,
-        top_p=top_p,
         random_state=12345,
     )
     utree.fit(X)
@@ -98,7 +96,7 @@ def test_moons_impute(strategy, n_bins, duplicate_K, top_p, min_score, k):
         import matplotlib.pyplot as plt
         plt.figure()
         plt.scatter(imputedX[0, :, 0], imputedX[0, :, 1]);
-        plt.savefig(f'test_moons_impute-{strategy}-{n_bins}-{duplicate_K}-{top_p:.2f}.pdf')
+        plt.savefig(f'test_moons_impute-{strategy}-{depth}-{duplicate_K}.pdf')
 
     # Tests providing data to impute
     imputedX = utree.impute(n_impute=k, X=data4impute)

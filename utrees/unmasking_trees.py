@@ -10,7 +10,7 @@ from sklearn.base import BaseEstimator
 from sklearn.utils import check_random_state
 from sklearn.preprocessing import LabelEncoder
 
-from utrees.tobt import ToBT
+from utrees.baltobot import Baltobot
 from utrees.kdi_quantizer import KDIQuantizer
 
 
@@ -19,43 +19,6 @@ XGBOOST_DEFAULT_KWARGS = {
     'verbosity' : 1,
     'objective' : 'multi:softprob',
 }
-
-
-def top_p_sampling(n_bins, probs, rng, top_p):
-    """A modified implementation of nucleus sampling.
-    For the class straddling the top_p boundary, the probability mass beyond top_p is discarded.
-    But this class does not receive zero probability mass, so it differs
-    from https://gist.github.com/thomwolf/1a5a29f6962089e871b94cbd09daf317 .
-    This is more mathematically elegant, in my humble opinion.
-
-    Parameters
-    ----------
-    n_bins : int
-        The number of classes (ie vocab size) to sample from.
-
-    probs : np.ndarray with n_bins elements
-        The sampling probabilities (not logits) for each bin.
-
-    rng : np.random.RandomState
-        An instantiated random number generator.
-        
-    top_p : float in (0, 1]
-        Top-p probability filter.
-        
-    Returns
-    -------
-    chosen : np.ndarray of size (1,)
-        The sampled integer in [0, n_bins).
-    """
-    probs = probs.ravel()  # currently assumes only one sample
-    sort_indices = np.argsort(probs)[::-1]
-    sort_probs = probs[sort_indices]
-    cumsum_probs = np.cumsum(sort_probs)
-    unnorm_probs = np.diff(np.minimum(cumsum_probs, top_p), prepend=0.)
-    unnorm_probs = unnorm_probs[np.argsort(sort_indices)]  # undo the sort
-    norm_probs = unnorm_probs / np.sum(unnorm_probs)
-    chosen = np.array(rng.choice(n_bins, p=norm_probs))
-    return chosen
 
 
 class UnmaskingTrees(BaseEstimator):
@@ -69,9 +32,6 @@ class UnmaskingTrees(BaseEstimator):
     duplicate_K : int > 0
         Number of random masking orders per actual sample.
         The training dataset will be of size (n_samples * n_dims * duplicate_K, n_dims).
-
-    top_p : 0 < float <= 1
-        Nucleus sampling parameter for inference. Smaller number produces less noisy generations.
 
     xgboost_kwargs : dict
         Arguments for XGBoost classifier.
@@ -110,7 +70,6 @@ class UnmaskingTrees(BaseEstimator):
     def __init__(
         self,
         duplicate_K: int = 50,
-        top_p: float = 1.,
         xgboost_kwargs: dict = {},
         depth: int = 4,
         strategy: str = 'kdiquantile',
@@ -118,7 +77,6 @@ class UnmaskingTrees(BaseEstimator):
         random_state = None,
     ):
         self.duplicate_K = duplicate_K
-        self.top_p = top_p
         self.xgboost_kwargs = xgboost_kwargs
         self.xgboost_kwargs_ = XGBOOST_DEFAULT_KWARGS.copy()
         self.xgboost_kwargs_.update(xgboost_kwargs)
@@ -128,7 +86,6 @@ class UnmaskingTrees(BaseEstimator):
         self.random_state = random_state
 
         assert 1 <= duplicate_K
-        assert 0 < top_p <= 1
         assert self.xgboost_kwargs_['objective'] in ('binary:logistic', 'multi:softprob')
         assert strategy in ('kdiquantile', 'quantile', 'uniform', 'kmeans', 'hierarchical')
         assert 0 < softmax_temp
@@ -196,11 +153,11 @@ class UnmaskingTrees(BaseEstimator):
         self.encoders_ = []
         for d in range(n_dims):
             if self.quantize_cols_[d]:
-                curq = None
+                enc = None
             else:
-                curq = LabelEncoder()
-                curq.fit(X[~np.isnan(X[:, d]), d])
-            self.encoders_.append(curq)
+                enc = LabelEncoder()
+                enc.fit(X[~np.isnan(X[:, d]), d])
+            self.encoders_.append(enc)
 
         # Generate training data
         X_train = []
@@ -221,18 +178,6 @@ class UnmaskingTrees(BaseEstimator):
         X_train = np.concatenate(X_train, axis=0)
         Y_train = np.concatenate(Y_train, axis=0)
 
-        # Replace each KDIQuantizer with (KDIQuantizer, LabelEncoder) tuple,
-        # because we need to remove bins which are empty before giving to xgboost.
-        """
-        for d in range(n_dims):
-            if self.quantize_cols_[d]:
-                train_ixs = ~np.isnan(Y_train[:, d])
-                cur_q = self.encoders_[d]
-                curY_train = cur_q.transform(Y_train[train_ixs, d:d+1])
-                cur_le = LabelEncoder().fit(curY_train.ravel())
-                self.encoders_[d] = (cur_q, cur_le)
-        """
-
         # Unmask constant-value columns before training
         for d in range(n_dims):
             if self.constant_vals_[d] is not None:
@@ -246,22 +191,9 @@ class UnmaskingTrees(BaseEstimator):
                 continue
             train_ixs = ~np.isnan(Y_train[:, d])
             curX_train = X_train[train_ixs, :]
-            """
-            if self.quantize_cols_[d]:
-                (cur_q, cur_le) = self.encoders_[d]
-                curY_train = cur_le.transform(cur_q.transform(Y_train[train_ixs, d:d+1]).ravel())
-            else:
-                curY_train = self.encoders_[d].transform(Y_train[train_ixs, d])
-            my_xgboost_kwargs = dict(**self.xgboost_kwargs_)
-            if len(np.unique(curY_train)) == 2:
-                my_xgboost_kwargs['objective'] = 'binary:logistic'
-            xgber = xgb.XGBClassifier(**my_xgboost_kwargs)
-            xgber.fit(curX_train, curY_train)
-            self.trees_.append(xgber)
-            """
             if self.quantize_cols_[d]:
                 curY_train = Y_train[train_ixs, d]
-                tobter = ToBT(
+                tobter = Baltobot(
                     depth=self.depth,
                     xgboost_kwargs=self.xgboost_kwargs,
                     strategy=self.strategy,
@@ -346,22 +278,6 @@ class UnmaskingTrees(BaseEstimator):
             for kix in range(n_impute):
                 for dix in range(n_to_unmask):
                     unmask_ix = unmask_ixs[kix, dix]
-                    """
-                    pred_probas = self.trees_[unmask_ix].predict_proba(imputedX[kix,[n], :])
-                    with np.errstate(divide='ignore'):
-                        annealed_logits = np.log(pred_probas) / self.softmax_temp
-                    pred_probas = np.exp(annealed_logits) / np.sum(np.exp(annealed_logits), axis=1)
-                    if self.quantize_cols_[unmask_ix]:
-                        (cur_q, cur_le) = self.encoders_[unmask_ix]
-                        pred_quant = top_p_sampling(len(cur_le.classes_), pred_probas, rng, self.top_p)
-                        pred_quant = cur_le.inverse_transform(pred_quant.reshape(1,))
-                        pred_val = cur_q.inverse_transform_sample(pred_quant.reshape(1, 1))
-                    else:
-                        cur_quant = self.encoders_[unmask_ix]
-                        pred_quant = top_p_sampling(len(cur_quant.classes_), pred_probas, rng, self.top_p)
-                        pred_val = cur_quant.inverse_transform(pred_quant.reshape(1,))
-                    imputedX[kix, n, unmask_ix] = pred_val.item()
-                    """
                     if self.quantize_cols_[unmask_ix]:
                         pred_val = self.trees_[unmask_ix].sample(imputedX[kix,[n], :])
                     else:
@@ -369,9 +285,9 @@ class UnmaskingTrees(BaseEstimator):
                         with np.errstate(divide='ignore'):
                             annealed_logits = np.log(pred_probas) / self.softmax_temp
                         pred_probas = np.exp(annealed_logits) / np.sum(np.exp(annealed_logits), axis=1)
-                        cur_quant = self.encoders_[unmask_ix]
-                        pred_quant = top_p_sampling(len(cur_quant.classes_), pred_probas, rng, self.top_p)
-                        pred_val = cur_quant.inverse_transform(pred_quant.reshape(1,))
+                        cur_enc = self.encoders_[unmask_ix]
+                        pred_enc = rng.choice(a=len(cur_enc.classes_), p=pred_probas.ravel())
+                        pred_val = cur_enc.inverse_transform(np.array([pred_enc]))
                     imputedX[kix, n, unmask_ix] = pred_val.item()
 
 

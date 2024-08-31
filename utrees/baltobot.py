@@ -19,7 +19,7 @@ XGBOOST_DEFAULT_KWARGS = {
 }
 
 
-class ToBT(BaseEstimator):
+class Baltobot(BaseEstimator):
     def __init__(
         self,
         depth: int = 4,
@@ -45,14 +45,14 @@ class ToBT(BaseEstimator):
         self.constant_val_ = None
 
         if depth > 0:
-            self.left_child_ = ToBT(
+            self.left_child_ = Baltobot(
                 depth=depth - 1,
                 xgboost_kwargs=xgboost_kwargs,
                 strategy=strategy,
                 softmax_temp=softmax_temp,
                 random_state=random_state,
             )
-            self.right_child_ = ToBT(
+            self.right_child_ = Baltobot(
                 depth=depth - 1,
                 xgboost_kwargs=xgboost_kwargs,
                 strategy=strategy,
@@ -66,12 +66,11 @@ class ToBT(BaseEstimator):
         y: np.ndarray,
     ):
         assert np.isnan(y).sum() == 0
-        y_uniq = np.unique(y)
-        if y_uniq.shape[0] <= 1:
-            if y_uniq.shape[0] == 0:
-                self.constant_val_ = 0.
-            else:
-                self.constant_val_ = y_uniq[0]
+        if y.size == 0:
+            self.constant_val_ = 0.
+            return self
+        elif np.std(y) == 0:
+            self.constant_val_ = np.mean(y)
             return self
         self.constant_val_ = None
 
@@ -126,6 +125,25 @@ class ToBT(BaseEstimator):
         X: np.ndarray,
         y: np.ndarray,
     ):
+        """Compute the conditional log-likelihood of y given X.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            An array of points to query.  Last dimension should match dimension
+            of training data (n_features).
+
+        y : array-like of shape (n_samples,)
+            Output variable.
+
+        Returns
+        -------
+        density : ndarray of shape (n_samples,)
+            Log-likelihood of each sample. These are normalized to be
+            probability densities, after exponentiating, though will not
+            necessarily exactly sum to 1 due to numerical error.
+        """
+
         n, d = X.shape
         if self.constant_val_ is not None:
             return np.log(y == self.constant_val_)
@@ -134,17 +152,25 @@ class ToBT(BaseEstimator):
         y_quant = self.quantizer_.transform(y.reshape(-1, 1)).ravel()
         y_enc = self.encoder_.transform(y_quant)
         if self.depth == 0:
-            return (y_enc==0)*np.log(pred_prob[:,0]) + (y_enc==1)*np.log(pred_prob[:,1])
+            left_ixs = y_enc == 0
+            right_ixs = y_enc == 1
+            bin_edges = self.quantizer_.bin_edges_[0]
+            left_width = bin_edges[1] - bin_edges[0] + 1e-15
+            right_width = bin_edges[2] - bin_edges[1] + 1e-15
+            scores = np.zeros((n,))
+            scores[left_ixs] = np.log(pred_prob[left_ixs, 0] / left_width)
+            scores[right_ixs] = np.log(pred_prob[right_ixs, 1] / right_width)
+            return scores
         else:
             left_ixs = y_enc == 0
             right_ixs = y_enc == 1
             scores = np.zeros((n,))
             if left_ixs.sum() > 0:
                 left_scores = self.left_child_.score_samples(X[left_ixs, :], y[left_ixs])
-                scores[left_ixs] = np.log(pred_prob[left_ixs,0]) + left_scores
+                scores[left_ixs] = np.log(pred_prob[left_ixs, 0]) + left_scores
             if right_ixs.sum() > 0:
                 right_scores = self.right_child_.score_samples(X[right_ixs, :], y[right_ixs])
-                scores[right_ixs] = np.log(pred_prob[right_ixs,1]) + right_scores
+                scores[right_ixs] = np.log(pred_prob[right_ixs, 1]) + right_scores
             return scores
 
     def score(
@@ -152,4 +178,21 @@ class ToBT(BaseEstimator):
         X: np.ndarray,
         y: np.ndarray,
     ):
-        return np.sum(self.score_samples(X, y))
+        """Compute the total log probability density under the model.
+
+        Parameters
+        ----------
+        X : array_like, shape (n_samples, n_features)
+            List of n_features-dimensional data points.  Each row
+            corresponds to a single data point.
+
+        y : array-like of shape (n_samples,)
+            Output variable.
+
+        Returns
+        -------
+        logprob : float
+            Total log-likelihood of y given X.
+        """
+        logprob = np.sum(self.score_samples(X, y))
+        return logprob
