@@ -48,19 +48,24 @@ def test_moons_generate(strategy, depth, duplicate_K, min_score):
     assert scores.mean() >= min_score
 
 
-@pytest.mark.parametrize("strategy, depth, duplicate_K, min_score, k", [
-    ("kdiquantile", 3, 10, -1.5, 1),
-    ("kdiquantile", 3, 10, -1.5, 1),
-    ("kdiquantile", 4, 10, -1.5, 1),
-    ("kdiquantile", 4, 50, -1.5, 1),
-    ("kdiquantile", 5, 50, -1.5, 1),
-    ("kdiquantile", 3, 10, -1.5, 3),
-    ("kdiquantile", 3, 10, -1.5, 3),
-    ("kdiquantile", 4, 10, -1.5, 3),
-    ("kdiquantile", 4, 50, -1.5, 3),
-    ("kdiquantile", 5, 50, -1.5, 3),
+@pytest.mark.parametrize("strategy, depth, duplicate_K, force_float32, min_score, k", [
+    ("kdiquantile", 3, 10, True, -1.5, 1),
+    ("kdiquantile", 3, 10, True, -1.5, 1),
+    ("kdiquantile", 4, 10, True, -1.5, 1),
+    ("kdiquantile", 4, 50, True, -1.5, 1),
+    ("kdiquantile", 5, 50, True, -1.5, 1),
+    ("kdiquantile", 3, 10, False, -1.5, 1),
+    ("kdiquantile", 3, 10, False, -1.5, 1),
+    ("kdiquantile", 4, 10, False, -1.5, 1),
+    ("kdiquantile", 4, 50, False, -1.5, 1),
+    ("kdiquantile", 5, 50, False, -1.5, 1),
+    ("kdiquantile", 3, 10, False, -1.5, 3),
+    ("kdiquantile", 3, 10, False, -1.5, 3),
+    ("kdiquantile", 4, 10, False, -1.5, 3),
+    ("kdiquantile", 4, 50, False, -1.5, 3),
+    ("kdiquantile", 5, 50, False, -1.5, 3),
 ])
-def test_moons_impute(strategy, depth, duplicate_K, min_score, k):
+def test_moons_impute(strategy, depth, force_float32, duplicate_K, min_score, k):
     n_upper = 100
     n_lower = 100
     n = n_upper + n_lower
@@ -69,11 +74,14 @@ def test_moons_impute(strategy, depth, duplicate_K, min_score, k):
     data4impute = data.copy()
     data4impute[:, 1] = np.nan
     X=np.concatenate([data, data4impute], axis=0)
+    if force_float32:
+        X = X.astype(np.float32)
 
     utree = UnmaskingTrees(
         depth=depth,
         strategy=strategy,
         duplicate_K=duplicate_K,
+        force_float32=force_float32,
         random_state=12345,
     )
     utree.fit(X)

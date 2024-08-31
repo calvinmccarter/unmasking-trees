@@ -39,6 +39,9 @@ class UnmaskingTrees(BaseEstimator):
     strategy : 'kdiquantile', 'quantile', 'uniform', 'kmeans'
         The quantization strategy for discretizing continuous features.
 
+    force_float32: bool
+        Whether to always convert inputs to float32.
+
     random_state : int, RandomState instance or None, default=None
         Determines random number generation.
 
@@ -74,6 +77,7 @@ class UnmaskingTrees(BaseEstimator):
         depth: int = 4,
         strategy: str = 'kdiquantile',
         softmax_temp: float = 1.,
+        force_float32: bool = True,
         random_state = None,
     ):
         self.duplicate_K = duplicate_K
@@ -83,11 +87,12 @@ class UnmaskingTrees(BaseEstimator):
         self.depth = depth
         self.strategy = strategy
         self.softmax_temp = softmax_temp
+        self.force_float32 = force_float32
         self.random_state = random_state
 
         assert 1 <= duplicate_K
         assert self.xgboost_kwargs_['objective'] in ('binary:logistic', 'multi:softprob')
-        assert strategy in ('kdiquantile', 'quantile', 'uniform', 'kmeans', 'hierarchical')
+        assert strategy in ('kdiquantile', 'quantile', 'uniform', 'kmeans')
         assert 0 < softmax_temp
     
         self.trees_ = None
@@ -119,7 +124,10 @@ class UnmaskingTrees(BaseEstimator):
         """
         rng = check_random_state(self.random_state)
         assert isinstance(X, np.ndarray)
+        if self.force_float32:
+            X = X.astype(np.float32)
         n_samples, n_dims = X.shape
+
         if isinstance(quantize_cols, list):
             assert len(quantize_cols) == n_dims
             self.quantize_cols_ = []
