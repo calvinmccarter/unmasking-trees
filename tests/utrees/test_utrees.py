@@ -19,7 +19,6 @@ CREATE_PLOTS = False
     ("kdiquantile", 10, 10, 0.9, -2.),
     ("kdiquantile", 5, 50, 0.9, -2.),
     ("kdiquantile", 20, 50, 0.9, -1.5),
-    ("treeffuser", 5, 10, 0.9, -2.),
 ])
 def test_moons_generate(strategy, n_bins, duplicate_K, top_p, min_score):
     n_upper = 100
@@ -61,8 +60,6 @@ def test_moons_generate(strategy, n_bins, duplicate_K, top_p, min_score):
     ("kdiquantile", 10, 10, 0.9, -2., 3),
     ("kdiquantile", 5, 50, 0.9, -2., 3),
     ("kdiquantile", 20, 50, 0.9, -1.5, 3),
-    ("treeffuser", 5, 10, 0.9, -2., 1),
-    ("treeffuser", 5, 10, 0.9, -2., 3),
 ])
 def test_moons_impute(strategy, n_bins, duplicate_K, top_p, min_score, k):
     n_upper = 100

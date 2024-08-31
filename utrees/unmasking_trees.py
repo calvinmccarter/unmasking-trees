@@ -9,8 +9,8 @@ import xgboost as xgb
 from sklearn.base import BaseEstimator
 from sklearn.utils import check_random_state
 from sklearn.preprocessing import LabelEncoder
-from treeffuser import Treeffuser
 
+from utrees.tobt import ToBT
 from utrees.kdi_quantizer import KDIQuantizer
 
 
@@ -66,10 +66,6 @@ class UnmaskingTrees(BaseEstimator):
 
     Parameters
     ----------
-    n_bins : int > 1
-        Number of bins for discretizing continuous features.
-        This allows modeling feature distributions with multiple modes.
-
     duplicate_K : int > 0
         Number of random masking orders per actual sample.
         The training dataset will be of size (n_samples * n_dims * duplicate_K, n_dims).
@@ -80,9 +76,8 @@ class UnmaskingTrees(BaseEstimator):
     xgboost_kwargs : dict
         Arguments for XGBoost classifier.
 
-    strategy : 'kdiquantile', 'quantile', 'uniform', 'kmeans', or 'treeffuser'
+    strategy : 'kdiquantile', 'quantile', 'uniform', 'kmeans'
         The quantization strategy for discretizing continuous features.
-        If 'treeffuser', does not quantize continuous features, instead using diffusion.
 
     random_state : int, RandomState instance or None, default=None
         Determines random number generation.
@@ -114,27 +109,29 @@ class UnmaskingTrees(BaseEstimator):
     """
     def __init__(
         self,
-        n_bins: int = 20,
         duplicate_K: int = 50,
-        top_p: float = 0.9,
+        top_p: float = 1.,
         xgboost_kwargs: dict = {},
+        depth: int = 4,
         strategy: str = 'kdiquantile',
+        softmax_temp: float = 1.,
         random_state = None,
     ):
-        self.n_bins = n_bins
         self.duplicate_K = duplicate_K
         self.top_p = top_p
         self.xgboost_kwargs = xgboost_kwargs
         self.xgboost_kwargs_ = XGBOOST_DEFAULT_KWARGS.copy()
         self.xgboost_kwargs_.update(xgboost_kwargs)
+        self.depth = depth
         self.strategy = strategy
+        self.softmax_temp = softmax_temp
         self.random_state = random_state
 
-        assert 2 <= n_bins
         assert 1 <= duplicate_K
         assert 0 < top_p <= 1
         assert self.xgboost_kwargs_['objective'] in ('binary:logistic', 'multi:softprob')
-        assert strategy in ('kdiquantile', 'quantile', 'uniform', 'kmeans', 'treeffuser')
+        assert strategy in ('kdiquantile', 'quantile', 'uniform', 'kmeans', 'hierarchical')
+        assert 0 < softmax_temp
     
         self.trees_ = None
         self.constant_vals_ = None
@@ -175,10 +172,7 @@ class UnmaskingTrees(BaseEstimator):
                 elif elt == 'categorical':
                     self.quantize_cols_.append(False)
                 elif elt == 'integer':
-                    if len(np.unique(X[:, d])) > self.n_bins:
-                        self.quantize_cols_.append(True)
-                    else:
-                        self.quantize_cols_.append(False)
+                    self.quantize_cols_.append(True)
                 else:
                     assert elt in ('continuous', 'categorical', 'integer')
         elif quantize_cols == 'none':
@@ -202,9 +196,7 @@ class UnmaskingTrees(BaseEstimator):
         self.encoders_ = []
         for d in range(n_dims):
             if self.quantize_cols_[d]:
-                curq = KDIQuantizer(
-                    n_bins=self.n_bins, encode='ordinal', strategy=self.strategy)
-                curq.fit(X[~np.isnan(X[:, d]), d:d+1])
+                curq = None
             else:
                 curq = LabelEncoder()
                 curq.fit(X[~np.isnan(X[:, d]), d])
@@ -231,6 +223,7 @@ class UnmaskingTrees(BaseEstimator):
 
         # Replace each KDIQuantizer with (KDIQuantizer, LabelEncoder) tuple,
         # because we need to remove bins which are empty before giving to xgboost.
+        """
         for d in range(n_dims):
             if self.quantize_cols_[d]:
                 train_ixs = ~np.isnan(Y_train[:, d])
@@ -238,6 +231,7 @@ class UnmaskingTrees(BaseEstimator):
                 curY_train = cur_q.transform(Y_train[train_ixs, d:d+1])
                 cur_le = LabelEncoder().fit(curY_train.ravel())
                 self.encoders_[d] = (cur_q, cur_le)
+        """
 
         # Unmask constant-value columns before training
         for d in range(n_dims):
@@ -252,18 +246,32 @@ class UnmaskingTrees(BaseEstimator):
                 continue
             train_ixs = ~np.isnan(Y_train[:, d])
             curX_train = X_train[train_ixs, :]
-            if self.quantize_cols_[d] and self.strategy == 'treeffuser':
-                tfser = Treeffuser(seed=self.random_state)
-                curY_train = Y_train[train_ixs, d]
-                tfser.fit(curX_train.astype(np.float32), curY_train.astype(np.float32))
-                self.trees_.append(tfser)
+            """
+            if self.quantize_cols_[d]:
+                (cur_q, cur_le) = self.encoders_[d]
+                curY_train = cur_le.transform(cur_q.transform(Y_train[train_ixs, d:d+1]).ravel())
             else:
-                if self.quantize_cols_[d]:
-                    (cur_q, cur_le) = self.encoders_[d]
-                    curY_train = cur_le.transform(cur_q.transform(Y_train[train_ixs, d:d+1]).ravel())
-                else:
-                    curY_train = self.encoders_[d].transform(Y_train[train_ixs, d])
-                curX_train = X_train[train_ixs, :]
+                curY_train = self.encoders_[d].transform(Y_train[train_ixs, d])
+            my_xgboost_kwargs = dict(**self.xgboost_kwargs_)
+            if len(np.unique(curY_train)) == 2:
+                my_xgboost_kwargs['objective'] = 'binary:logistic'
+            xgber = xgb.XGBClassifier(**my_xgboost_kwargs)
+            xgber.fit(curX_train, curY_train)
+            self.trees_.append(xgber)
+            """
+            if self.quantize_cols_[d]:
+                curY_train = Y_train[train_ixs, d]
+                tobter = ToBT(
+                    depth=self.depth,
+                    xgboost_kwargs=self.xgboost_kwargs,
+                    strategy=self.strategy,
+                    softmax_temp=self.softmax_temp,
+                    random_state=self.random_state,
+                )
+                tobter.fit(curX_train, curY_train)
+                self.trees_.append(tobter)
+            else:
+                curY_train = self.encoders_[d].transform(Y_train[train_ixs, d])
                 my_xgboost_kwargs = dict(**self.xgboost_kwargs_)
                 if len(np.unique(curY_train)) == 2:
                     my_xgboost_kwargs['objective'] = 'binary:logistic'
@@ -338,20 +346,34 @@ class UnmaskingTrees(BaseEstimator):
             for kix in range(n_impute):
                 for dix in range(n_to_unmask):
                     unmask_ix = unmask_ixs[kix, dix]
-                    if self.quantize_cols_[unmask_ix] and self.strategy == 'treeffuser':
-                        pred_val = self.trees_[unmask_ix].sample(imputedX[kix,[n], :].astype(np.float32), n_samples=1)
+                    """
+                    pred_probas = self.trees_[unmask_ix].predict_proba(imputedX[kix,[n], :])
+                    with np.errstate(divide='ignore'):
+                        annealed_logits = np.log(pred_probas) / self.softmax_temp
+                    pred_probas = np.exp(annealed_logits) / np.sum(np.exp(annealed_logits), axis=1)
+                    if self.quantize_cols_[unmask_ix]:
+                        (cur_q, cur_le) = self.encoders_[unmask_ix]
+                        pred_quant = top_p_sampling(len(cur_le.classes_), pred_probas, rng, self.top_p)
+                        pred_quant = cur_le.inverse_transform(pred_quant.reshape(1,))
+                        pred_val = cur_q.inverse_transform_sample(pred_quant.reshape(1, 1))
+                    else:
+                        cur_quant = self.encoders_[unmask_ix]
+                        pred_quant = top_p_sampling(len(cur_quant.classes_), pred_probas, rng, self.top_p)
+                        pred_val = cur_quant.inverse_transform(pred_quant.reshape(1,))
+                    imputedX[kix, n, unmask_ix] = pred_val.item()
+                    """
+                    if self.quantize_cols_[unmask_ix]:
+                        pred_val = self.trees_[unmask_ix].sample(imputedX[kix,[n], :])
                     else:
                         pred_probas = self.trees_[unmask_ix].predict_proba(imputedX[kix,[n], :])
-                        if self.quantize_cols_[unmask_ix]:
-                            (cur_q, cur_le) = self.encoders_[unmask_ix]
-                            pred_quant = top_p_sampling(len(cur_le.classes_), pred_probas, rng, self.top_p)
-                            pred_quant = cur_le.inverse_transform(pred_quant.reshape(1,))
-                            pred_val = cur_q.inverse_transform_sample(pred_quant.reshape(1, 1))
-                        else:
-                            cur_quant = self.encoders_[unmask_ix]
-                            pred_quant = top_p_sampling(len(cur_quant.classes_), pred_probas, rng, self.top_p)
-                            pred_val = cur_quant.inverse_transform(pred_quant.reshape(1,))
+                        with np.errstate(divide='ignore'):
+                            annealed_logits = np.log(pred_probas) / self.softmax_temp
+                        pred_probas = np.exp(annealed_logits) / np.sum(np.exp(annealed_logits), axis=1)
+                        cur_quant = self.encoders_[unmask_ix]
+                        pred_quant = top_p_sampling(len(cur_quant.classes_), pred_probas, rng, self.top_p)
+                        pred_val = cur_quant.inverse_transform(pred_quant.reshape(1,))
                     imputedX[kix, n, unmask_ix] = pred_val.item()
+
 
         return imputedX
 
@@ -361,7 +383,6 @@ class UnmaskingTrees(BaseEstimator):
         n_evals: int = 1,
     ):
         """Compute the log-likelihood of each sample under the model.
-        This assumes that treeffuser is not used.
 
         Parameters
         ----------
@@ -380,7 +401,6 @@ class UnmaskingTrees(BaseEstimator):
         """
         (n_samples, n_dims) = X.shape
         rng = check_random_state(self.random_state)
-        assert self.strategy != 'treeffuser'
 
         density = np.zeros((n_samples,))
         for n in range(n_samples):
