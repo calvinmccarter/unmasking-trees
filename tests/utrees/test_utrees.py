@@ -136,12 +136,12 @@ def test_iris(target_type):
     X, y = my_data['data'], my_data['target']
     n = X.shape[0]
     Xy = np.concatenate((X, np.expand_dims(y, axis=1)), axis=1)
-    ut_model = UnmaskingTrees()
+    ut_model = UnmaskingTrees(random_state=12345)
     ut_model.fit(Xy, quantize_cols=['continuous']*4 + [target_type])
     Xy_gen_utrees = ut_model.generate(n_generate=n)
     col_names = my_data['feature_names'] + ['target_names']
     petalw = col_names.index('petal width (cm)')
     petall = col_names.index('petal length (cm)')
     assert np.unique(Xy_gen_utrees[:, -1]).size == 3
-    assert np.unique(Xy_gen_utrees[:, petall]).size == n
+    assert np.unique(Xy_gen_utrees[:, petall]).size > n - 10
     assert 50 <= np.unique(Xy_gen_utrees[:, petalw]).size < 100

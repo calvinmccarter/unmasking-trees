@@ -84,7 +84,7 @@ class Baltobot(BaseEstimator):
 
         self.left_child_ = None
         self.right_child_ = None
-        self.quantizer_ = KDIQuantizer(n_bins=2, encode='ordinal', strategy=strategy)
+        self.quantizer_ = KDIQuantizer(n_bins=2, strategy=strategy, random_state=random_state)
         self.encoder_ = LabelEncoder()
         my_xgboost_kwargs = XGBOOST_DEFAULT_KWARGS.copy()
         my_xgboost_kwargs.update(xgboost_kwargs)
