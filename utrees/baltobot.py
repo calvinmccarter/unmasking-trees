@@ -79,12 +79,12 @@ class Baltobot(BaseEstimator):
         self.strategy = strategy
         self.softmax_temp = softmax_temp
         self.tabpfn = tabpfn
-        self.random_state = random_state
+        self.random_state = check_random_state(random_state)
         assert depth < 10  # 2^10 models is insane
 
         self.left_child_ = None
         self.right_child_ = None
-        self.quantizer_ = KDIQuantizer(n_bins=2, strategy=strategy, random_state=random_state)
+        self.quantizer_ = KDIQuantizer(n_bins=2, strategy=strategy, random_state=self.random_state)
         self.encoder_ = LabelEncoder()
         my_xgboost_kwargs = XGBOOST_DEFAULT_KWARGS.copy()
         my_xgboost_kwargs.update(xgboost_kwargs)
@@ -103,14 +103,14 @@ class Baltobot(BaseEstimator):
                 xgboost_kwargs=xgboost_kwargs,
                 strategy=strategy,
                 softmax_temp=softmax_temp,
-                random_state=random_state,
+                random_state=self.random_state,
             )
             self.right_child_ = Baltobot(
                 depth=depth - 1,
                 xgboost_kwargs=xgboost_kwargs,
                 strategy=strategy,
                 softmax_temp=softmax_temp,
-                random_state=random_state,
+                random_state=self.random_state,
             )
 
     def fit(
