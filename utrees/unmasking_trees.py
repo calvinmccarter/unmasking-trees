@@ -29,6 +29,10 @@ class UnmaskingTrees(BaseEstimator):
 
     Parameters
     ----------
+    depth : int >= 0
+        Depth of balanced binary tree for recursively quantizing each feature.
+        The total number of quantization bins is 2^depth.
+
     duplicate_K : int > 0
         Number of random masking orders per actual sample.
         The training dataset will be of size (n_samples * n_dims * duplicate_K, n_dims).
@@ -39,7 +43,15 @@ class UnmaskingTrees(BaseEstimator):
     strategy : 'kdiquantile', 'quantile', 'uniform', 'kmeans'
         The quantization strategy for discretizing continuous features.
 
-    force_float32: bool
+    softmax_temp : float > 0
+        Softmax temperature for sampling from predicted probabilities.
+        As temperature decreases below the default of 1, predictions converge
+        to the argmax of each conditional distribution.
+
+    tabpfn: bool
+        (Experimental) Whether to use TabPFN instead of XGBoost classifier.
+
+    cast_float32: bool
         Whether to always convert inputs to float32.
 
     random_state : int, RandomState instance or None, default=None
@@ -48,8 +60,9 @@ class UnmaskingTrees(BaseEstimator):
 
     Attributes
     ----------
-    trees_ : list of XGBClassifier
-        Fitted XGBoost models.
+    trees_ : list of Baltobot or XGBClassifier
+        Fitted per-feature sampling models. For each column ix, this 
+        will be Baltobot if quantize_cols_[ix], and XGBClassifier otherwise.
 
     constant_vals_ : list of float or None, with length n_dims
         Gives the values of constant features, or None otherwise.
@@ -60,8 +73,8 @@ class UnmaskingTrees(BaseEstimator):
     quantize_cols_ : list of bool, with length n_dims
         Whether to apply (and un-apply) discretization to each feature.
 
-    encoders_ : list of (KDIQuantizer, LabelEncoder) or LabelEncoder
-        Preprocessors for each feature.
+    encoders_ : list of None or LabelEncoder
+        Preprocessors for non-continuous features.
 
     xgboost_kwargs_ : 
         Args passed to XGBClassifier.
@@ -72,22 +85,24 @@ class UnmaskingTrees(BaseEstimator):
     """
     def __init__(
         self,
+        depth: int = 4,
         duplicate_K: int = 50,
         xgboost_kwargs: dict = {},
-        depth: int = 4,
         strategy: str = 'kdiquantile',
         softmax_temp: float = 1.,
-        force_float32: bool = True,
+        cast_float32: bool = True,
+        tabpfn: bool = False,
         random_state = None,
     ):
+        self.depth = depth
         self.duplicate_K = duplicate_K
         self.xgboost_kwargs = xgboost_kwargs
         self.xgboost_kwargs_ = XGBOOST_DEFAULT_KWARGS.copy()
         self.xgboost_kwargs_.update(xgboost_kwargs)
-        self.depth = depth
         self.strategy = strategy
         self.softmax_temp = softmax_temp
-        self.force_float32 = force_float32
+        self.cast_float32 = cast_float32
+        self.tabpfn = tabpfn
         self.random_state = random_state
 
         assert 1 <= duplicate_K
@@ -124,7 +139,8 @@ class UnmaskingTrees(BaseEstimator):
         """
         rng = check_random_state(self.random_state)
         assert isinstance(X, np.ndarray)
-        if self.force_float32:
+        self.X_ = X.copy()
+        if self.cast_float32:
             X = X.astype(np.float32)
         n_samples, n_dims = X.shape
 
@@ -161,11 +177,11 @@ class UnmaskingTrees(BaseEstimator):
         self.encoders_ = []
         for d in range(n_dims):
             if self.quantize_cols_[d]:
-                enc = None
+                cur_enc = None
             else:
-                enc = LabelEncoder()
-                enc.fit(X[~np.isnan(X[:, d]), d])
-            self.encoders_.append(enc)
+                cur_enc = LabelEncoder()
+                cur_enc.fit(X[~np.isnan(X[:, d]), d])
+            self.encoders_.append(cur_enc)
 
         # Generate training data
         X_train = []
@@ -201,15 +217,16 @@ class UnmaskingTrees(BaseEstimator):
             curX_train = X_train[train_ixs, :]
             if self.quantize_cols_[d]:
                 curY_train = Y_train[train_ixs, d]
-                tobter = Baltobot(
+                balto = Baltobot(
                     depth=self.depth,
                     xgboost_kwargs=self.xgboost_kwargs,
                     strategy=self.strategy,
                     softmax_temp=self.softmax_temp,
+                    tabpfn=self.tabpfn,
                     random_state=self.random_state,
                 )
-                tobter.fit(curX_train, curY_train)
-                self.trees_.append(tobter)
+                balto.fit(curX_train, curY_train)
+                self.trees_.append(balto)
             else:
                 curY_train = self.encoders_[d].transform(Y_train[train_ixs, d])
                 my_xgboost_kwargs = dict(**self.xgboost_kwargs_)
@@ -218,7 +235,6 @@ class UnmaskingTrees(BaseEstimator):
                 xgber = xgb.XGBClassifier(**my_xgboost_kwargs)
                 xgber.fit(curX_train, curY_train)
                 self.trees_.append(xgber)
-        self.X_ = X.copy()
         return self
 
     def generate(
@@ -297,8 +313,6 @@ class UnmaskingTrees(BaseEstimator):
                         pred_enc = rng.choice(a=len(cur_enc.classes_), p=pred_probas.ravel())
                         pred_val = cur_enc.inverse_transform(np.array([pred_enc]))
                     imputedX[kix, n, unmask_ix] = pred_val.item()
-
-
         return imputedX
 
     def score_samples(
@@ -336,18 +350,13 @@ class UnmaskingTrees(BaseEstimator):
                     if not np.isnan(X[n, eval_ix]):
                         evalX = X[[n], :].copy()
                         evalX[:, eval_order[dix:]] = np.nan
-                        probas = self.trees_[eval_ix].predict_proba(evalX)[0, :]
+                        evaly = X[[n], eval_ix]
                         if self.quantize_cols_[eval_ix]:
-                            (cur_quant, cur_le) = self.encoders_[eval_ix]
-                            true_bin = cur_quant.transform(X[[n], eval_ix:eval_ix+1]).astype(int).ravel()
-                            bin_width = (
-                                cur_quant.bin_edges_[0][true_bin+1] - cur_quant.bin_edges_[0][true_bin]
-                            ) + 1e-8
-                            true_class = cur_le.transform(true_bin).item()
-                            cur_density[k] += np.log(probas[true_class] / bin_width)
+                            cur_density[k] += self.trees_[eval_ix].score_samples(evalX, evaly).item()
                         else:
-                            cur_quant = self.encoders_[eval_ix]
-                            true_class = cur_quant.transform(X[[n], eval_ix:eval_ix+1]).ravel().item()
+                            probas = self.trees_[eval_ix].predict_proba(evalX).ravel()
+                            cur_enc = self.encoders_[eval_ix]
+                            true_class = cur_enc.transform(evaly.reshape(1, 1)).item()
                             cur_density[k] += np.log(probas[true_class])
             density[n] = np.mean(cur_density)
         return density

@@ -3,7 +3,6 @@ import pytest
 import time
 
 from sklearn.datasets import (
-    fetch_openml,
     load_iris,
     make_moons,
 )
@@ -48,7 +47,7 @@ def test_moons_generate(strategy, depth, duplicate_K, min_score):
     assert scores.mean() >= min_score
 
 
-@pytest.mark.parametrize("strategy, depth, duplicate_K, force_float32, min_score, k", [
+@pytest.mark.parametrize("strategy, depth, duplicate_K, cast_float32, min_score, k", [
     ("kdiquantile", 3, 10, True, -1.5, 1),
     ("kdiquantile", 3, 10, True, -1.5, 1),
     ("kdiquantile", 4, 10, True, -1.5, 1),
@@ -65,7 +64,7 @@ def test_moons_generate(strategy, depth, duplicate_K, min_score):
     ("kdiquantile", 4, 50, False, -1.5, 3),
     ("kdiquantile", 5, 50, False, -1.5, 3),
 ])
-def test_moons_impute(strategy, depth, force_float32, duplicate_K, min_score, k):
+def test_moons_impute(strategy, depth, cast_float32, duplicate_K, min_score, k):
     n_upper = 100
     n_lower = 100
     n = n_upper + n_lower
@@ -74,14 +73,12 @@ def test_moons_impute(strategy, depth, force_float32, duplicate_K, min_score, k)
     data4impute = data.copy()
     data4impute[:, 1] = np.nan
     X=np.concatenate([data, data4impute], axis=0)
-    if force_float32:
-        X = X.astype(np.float32)
 
     utree = UnmaskingTrees(
         depth=depth,
         strategy=strategy,
         duplicate_K=duplicate_K,
-        force_float32=force_float32,
+        cast_float32=cast_float32,
         random_state=12345,
     )
     utree.fit(X)
@@ -116,3 +113,35 @@ def test_moons_impute(strategy, depth, force_float32, duplicate_K, min_score, k)
         np.testing.assert_equal(imputedXcur[nannystate], data4impute[nannystate])
         scores = kde.score_samples(imputedXcur)
         assert scores.mean() >= min_score
+
+def test_moons_score_samples():
+    n_upper = 100
+    n_lower = 100
+    n_generate = 123
+    n = n_upper + n_lower
+    data, labels = make_moons(
+        (n_upper, n_lower), shuffle=False, noise=0.1, random_state=12345)
+
+    utree = UnmaskingTrees(random_state=12345)
+    utree.fit(data)
+    scores = utree.score_samples(data)
+    assert scores.shape == (200,)
+    assert np.min(scores) > -0.5
+
+@pytest.mark.parametrize('target_type', [
+    'continuous', 'categorical', 'integer',
+])
+def test_iris(target_type):
+    my_data = load_iris()
+    X, y = my_data['data'], my_data['target']
+    n = X.shape[0]
+    Xy = np.concatenate((X, np.expand_dims(y, axis=1)), axis=1)
+    ut_model = UnmaskingTrees()
+    ut_model.fit(Xy, quantize_cols=['continuous']*4 + [target_type])
+    Xy_gen_utrees = ut_model.generate(n_generate=n)
+    col_names = my_data['feature_names'] + ['target_names']
+    petalw = col_names.index('petal width (cm)')
+    petall = col_names.index('petal length (cm)')
+    assert np.unique(Xy_gen_utrees[:, -1]).size == 3
+    assert np.unique(Xy_gen_utrees[:, petall]).size == n
+    assert 50 <= np.unique(Xy_gen_utrees[:, petalw]).size < 100

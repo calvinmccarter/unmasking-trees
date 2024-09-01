@@ -11,7 +11,6 @@ from sklearn.utils import check_random_state
 
 from utrees.kdi_quantizer import KDIQuantizer
 
-
 XGBOOST_DEFAULT_KWARGS = {
     'tree_method' : 'hist',
     'verbosity' : 1,
@@ -20,18 +19,66 @@ XGBOOST_DEFAULT_KWARGS = {
 
 
 class Baltobot(BaseEstimator):
+    """Performs probabilistic prediction using a BALanced Tree Of BOosted Trees.
+
+    Parameters
+    ----------
+    depth : int >= 0
+        Depth of balanced binary tree for recursively quantizing each feature.
+        The total number of quantization bins is 2^depth.
+
+    xgboost_kwargs : dict
+        Arguments for XGBoost classifier.
+
+    strategy : 'kdiquantile', 'quantile', 'uniform', 'kmeans'
+        The quantization strategy for discretizing continuous features.
+
+    softmax_temp : float > 0
+        Softmax temperature for sampling from predicted probabilities.
+        As temperature decreases below the default of 1, predictions converge
+        to the argmax of each conditional distribution.
+
+    tabpfn: bool
+        (Experimental) Whether to use TabPFN instead of XGBoost classifier.
+
+    random_state : int, RandomState instance or None, default=None
+        Determines random number generation.
+
+
+    Attributes
+    ----------
+    constant_val_ : None or float
+        Stores the value of a non-varying target variable, avoiding uniform sampling.
+        This allows us to sample from discrete or mixed-type random variables.
+
+    quantizer_ : KDIQuantizer
+        Maps continuous value to bin. Almost always 2 bins.
+
+    encoder_ : LabelEncoder
+        Maps bin (float) to label (int). Almost always 2 classes.
+
+    xgber_ : XGBClassifier
+        Binary classifier that tell us whether to go left or right bin.
+
+    left_child_, right_child_ : Baltobot
+        Next level in the balanced binary tree.
+    """
+
     def __init__(
         self,
         depth: int = 4,
         xgboost_kwargs: dict = {},
         strategy: str = 'kdiquantile',
         softmax_temp: float = 1.,
+        tabpfn: bool = False,
         random_state = None,
     ):
+
         self.depth = depth
         self.xgboost_kwargs = xgboost_kwargs
         self.strategy = strategy
         self.softmax_temp = softmax_temp
+        self.tabpfn = tabpfn
         self.random_state = random_state
         assert depth < 10  # 2^10 models is insane
 
@@ -42,6 +89,12 @@ class Baltobot(BaseEstimator):
         my_xgboost_kwargs = XGBOOST_DEFAULT_KWARGS.copy()
         my_xgboost_kwargs.update(xgboost_kwargs)
         self.xgber_ = xgb.XGBClassifier(**my_xgboost_kwargs)
+
+        if self.tabpfn:
+            warnings.warn('Support for TabPFN is experimental.')
+            from tabpfn import TabPFNClassifier
+            self.xgber_ = TabPFNClassifier()
+
         self.constant_val_ = None
 
         if depth > 0:
@@ -65,20 +118,46 @@ class Baltobot(BaseEstimator):
         X: np.ndarray,
         y: np.ndarray,
     ):
+        """Recursively fits balanced tree of boosted tree classifiers.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Input variables of train set.
+
+        y : array-like of shape (n_samples,)
+            Continuous target variable of train set.
+
+        Returns
+        -------
+        self
+        """
+
         assert np.isnan(y).sum() == 0
         if y.size == 0:
             self.constant_val_ = 0.
-            return self
-        elif np.std(y) == 0:
-            self.constant_val_ = np.mean(y)
             return self
         self.constant_val_ = None
 
         self.quantizer_.fit(y.reshape(-1, 1))
         y_quant = self.quantizer_.transform(y.reshape(-1, 1)).ravel()
         self.encoder_.fit(y_quant)
+        if len(self.encoder_.classes_) != 2:
+            assert len(self.encoder_.classes_) == 1
+            assert np.std(y) < 1e-4
+            self.constant_val_ = np.mean(y)
+            return self
         y_enc = self.encoder_.transform(y_quant)
-        self.xgber_.fit(X, y_enc)
+
+        if self.tabpfn:
+            if X.shape[0] > 1024:
+                rng = check_random_state(self.random_state)
+                sixs = rng.choice(X.shape[0], 1024, replace=False)
+                self.xgber_.fit(X[sixs, :], y_enc[sixs])
+            else:
+                self.xgber_.fit(X, y_enc)
+        else:
+            self.xgber_.fit(X, y_enc)
 
         if self.depth > 0:
             left_ixs = y_enc == 0
@@ -92,6 +171,19 @@ class Baltobot(BaseEstimator):
         self,
         X: np.ndarray,
     ):
+        """Samples y conditional on X.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Input variables of test set.
+
+        Returns
+        -------
+        y : array-like of shape (n_samples,)
+            Samples from the conditional distribution.
+        """
+
         n, d = X.shape
         rng = check_random_state(self.random_state)
 

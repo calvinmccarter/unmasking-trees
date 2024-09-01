@@ -117,9 +117,9 @@ class KDIQuantizer(TransformerMixin, BaseEstimator):
             col_min, col_max = column.min(), column.max()
 
             if col_min == col_max:
-                warnings.warn(
-                    "Feature %d is constant and will be replaced with 0." % jj
-                )
+                #warnings.warn(
+                #    "Feature %d is constant and will be replaced with 0." % jj
+                #)
                 n_bins[jj] = 1
                 bin_edges[jj] = np.array([-np.inf, np.inf])
                 continue
