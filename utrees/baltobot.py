@@ -139,12 +139,27 @@ class Baltobot(BaseEstimator):
             return self
         self.constant_val_ = None
 
+        if self.tabpfn:
+            # Remove all nan rows and columns, in order of highest-missingness
+            self.tabpfn_cols_ = np.arange(X.shape[1])
+            isnanX = np.isnan(X)
+            while isnanX.sum() > 0:
+                rownans = isnanX.mean(axis=1)  # (n_samples,)
+                colnans = isnanX.mean(axis=0)  # (n_features,)
+                if rownans.max() >= colnans.max():
+                    X = np.delete(X, np.argmax(rownans), axis=0)
+                    y = np.delete(y, np.argmax(rownans), axis=0)
+                else:
+                    X = np.delete(X, np.argmax(colnans), axis=1)
+                    self.tabpfn_cols_ = np.delete(self.tabpfn_cols_, np.argmax(colnans))
+                isnanX = np.isnan(X)
+
         self.quantizer_.fit(y.reshape(-1, 1))
         y_quant = self.quantizer_.transform(y.reshape(-1, 1)).ravel()
         self.encoder_.fit(y_quant)
         if len(self.encoder_.classes_) != 2:
             assert len(self.encoder_.classes_) == 1
-            assert np.std(y) < 1e-4
+            assert np.unique(y).shape[0] == 1
             self.constant_val_ = np.mean(y)
             return self
         y_enc = self.encoder_.transform(y_quant)
@@ -189,6 +204,9 @@ class Baltobot(BaseEstimator):
 
         if self.constant_val_ is not None:
             return np.full((n,), fill_value=self.constant_val_)
+
+        if self.tabpfn:
+            X = X[:, self.tabpfn_cols_]
 
         pred_prob = self.xgber_.predict_proba(X)
         with np.errstate(divide='ignore'):

@@ -29,28 +29,26 @@ from sklearn.utils.validation import (
 
 class KDIQuantizer(TransformerMixin, BaseEstimator):
     _parameter_constraints: dict = {
-        "n_bins": [Interval(Integral, 2, None, closed="left"), "array-like"],
-        "encode": [StrOptions({"ordinal"})],
-        "strategy": [StrOptions({"uniform", "quantile", "kmeans", "kdiquantile", "treeffuser"})],
-        "dtype": [Options(type, {np.float64, np.float32}), None],
-        "subsample": [Interval(Integral, 1, None, closed="left"), None],
-        "random_state": ["random_state"],
+        'n_bins': [Interval(Integral, 2, None, closed='left'), 'array-like'],
+        'encode': [StrOptions({'ordinal'})],
+        'strategy': [StrOptions({'uniform', 'quantile', 'kmeans', 'kdiquantile'})],
+        'dtype': [Options(type, {np.float64, np.float32}), None],
+        'subsample': [Interval(Integral, 1, None, closed='left'), None],
+        'random_state': ['random_state'],
     }
 
     def __init__(
         self,
         n_bins=5,
         *,
-        encode="ordinal",
-        strategy="kdiquantile",
+        encode='ordinal',
+        strategy='kdiquantile',
         dtype=None,
         subsample=200_000,
         random_state=None,
     ):
         self.n_bins = n_bins
         self.encode = encode
-        if strategy == "treeffuser":
-            strategy = "kdiquantile"
         self.strategy = strategy
         self.dtype = dtype
         self.subsample = subsample
@@ -71,7 +69,7 @@ class KDIQuantizer(TransformerMixin, BaseEstimator):
 
         sample_weight : ndarray of shape (n_samples,)
             Contains weight values to be associated with each sample.
-            Cannot be used when `strategy` is set to `"uniform"`.
+            Cannot be used when `strategy` is set to `'uniform'`.
 
             .. versionadded:: 1.3
 
@@ -80,7 +78,7 @@ class KDIQuantizer(TransformerMixin, BaseEstimator):
         self : object
             Returns the instance itself.
         """
-        X = self._validate_data(X, dtype="numeric")
+        X = self._validate_data(X, dtype='numeric')
 
         if self.dtype in (np.float64, np.float32):
             output_dtype = self.dtype
@@ -89,11 +87,11 @@ class KDIQuantizer(TransformerMixin, BaseEstimator):
 
         n_samples, n_features = X.shape
 
-        if sample_weight is not None and self.strategy in ("uniform", "kdiquantile"):
+        if sample_weight is not None and self.strategy in ('uniform', 'kdiquantile'):
             raise ValueError(
-                "`sample_weight` was provided but it cannot be "
-                "used with 'uniform' or 'kdiquantile'. Got strategy="
-                f"{self.strategy!r} instead."
+                '`sample_weight` was provided but it cannot be '
+                'used with uniform or kdiquantile. Got strategy='
+                f'{self.strategy!r} instead.'
             )
 
         if self.subsample is not None and n_samples > self.subsample:
@@ -118,15 +116,15 @@ class KDIQuantizer(TransformerMixin, BaseEstimator):
 
             if col_min == col_max:
                 #warnings.warn(
-                #    "Feature %d is constant and will be replaced with 0." % jj
+                #    'Feature %d is constant and will be replaced with 0.' % jj
                 #)
                 n_bins[jj] = 1
                 bin_edges[jj] = np.array([-np.inf, np.inf])
                 continue
 
-            if self.strategy == "uniform":
+            if self.strategy == 'uniform':
                 bin_edges[jj] = np.linspace(col_min, col_max, n_bins[jj] + 1)
-            elif self.strategy == "quantile":
+            elif self.strategy == 'quantile':
                 quantiles = np.linspace(0, 100, n_bins[jj] + 1)
                 if sample_weight is None:
                     bin_edges[jj] = np.asarray(np.percentile(column, quantiles))
@@ -138,11 +136,16 @@ class KDIQuantizer(TransformerMixin, BaseEstimator):
                         ],
                         dtype=np.float64,
                     )
-            elif self.strategy == "kdiquantile":
+            elif self.strategy == 'kdiquantile':
                 quantiles = np.linspace(0, 1, n_bins[jj] + 1)
                 kdier = KDITransformer().fit(column.reshape(-1, 1))               
-                bin_edges[jj] = kdier.inverse_transform(quantiles.reshape(-1, 1)).ravel()
-            elif self.strategy == "kmeans":
+                cur_bin_edges = kdier.inverse_transform(quantiles.reshape(-1, 1)).ravel()
+                if np.unique(cur_bin_edges).shape[0] < n_bins[jj] + 1:
+                    # XXX - this bugfix is gross: find local minima instead
+                    cur_bin_edges = np.linspace(col_min, col_max, n_bins[jj] + 1)
+                    warnings.warn('kdiquantile numerical error detected, backing off.')
+                bin_edges[jj] = cur_bin_edges  # ndarray of shape (n_bins[jj] + 1,)
+            elif self.strategy == 'kmeans':
                 # Deterministic initialization with uniform spacing
                 uniform_edges = np.linspace(col_min, col_max, n_bins[jj] + 1)
                 init = (uniform_edges[1:] + uniform_edges[:-1])[:, None] * 0.5
@@ -159,14 +162,14 @@ class KDIQuantizer(TransformerMixin, BaseEstimator):
 
             """
             # Remove bins whose width are too small (i.e., <= 1e-8)
-            if self.strategy in ("quantile", "kmeans", "kdiquantile"):
+            if self.strategy in ('quantile', 'kmeans', 'kdiquantile'):
                 mask = np.ediff1d(bin_edges[jj], to_begin=np.inf) > 1e-8
                 bin_edges[jj] = bin_edges[jj][mask]
                 if len(bin_edges[jj]) - 1 != n_bins[jj]:
                     warnings.warn(
-                        "Bins whose width are too small (i.e., <= "
-                        "1e-8) in feature %d are removed. Consider "
-                        "decreasing the number of bins." % jj
+                        'Bins whose width are too small (i.e., <= '
+                        '1e-8) in feature %d are removed. Consider '
+                        'decreasing the number of bins.' % jj
                     )
                     n_bins[jj] = len(bin_edges[jj]) - 1
             """
@@ -174,10 +177,10 @@ class KDIQuantizer(TransformerMixin, BaseEstimator):
         self.bin_edges_ = bin_edges
         self.n_bins_ = n_bins
 
-        if "onehot" in self.encode:
+        if 'onehot' in self.encode:
             self._encoder = OneHotEncoder(
                 categories=[np.arange(i) for i in self.n_bins_],
-                sparse_output=self.encode == "onehot",
+                sparse_output=self.encode == 'onehot',
                 dtype=output_dtype,
             )
             # Fit the OneHotEncoder with toy datasets
@@ -195,17 +198,17 @@ class KDIQuantizer(TransformerMixin, BaseEstimator):
         n_bins = check_array(orig_bins, dtype=int, copy=True, ensure_2d=False)
 
         if n_bins.ndim > 1 or n_bins.shape[0] != n_features:
-            raise ValueError("n_bins must be a scalar or array of shape (n_features,).")
+            raise ValueError('n_bins must be a scalar or array of shape (n_features,).')
 
         bad_nbins_value = (n_bins < 2) | (n_bins != orig_bins)
 
         violating_indices = np.where(bad_nbins_value)[0]
         if violating_indices.shape[0] > 0:
-            indices = ", ".join(str(i) for i in violating_indices)
+            indices = ', '.join(str(i) for i in violating_indices)
             raise ValueError(
-                "{} received an invalid number "
-                "of bins at indices {}. Number of bins "
-                "must be at least 2, and must be an int.".format(
+                '{} received an invalid number '
+                'of bins at indices {}. Number of bins '
+                'must be at least 2, and must be an int.'.format(
                     KDIQuantizer.__name__, indices
                 )
             )
@@ -234,13 +237,13 @@ class KDIQuantizer(TransformerMixin, BaseEstimator):
 
         bin_edges = self.bin_edges_
         for jj in range(Xt.shape[1]):
-            Xt[:, jj] = np.searchsorted(bin_edges[jj][1:-1], Xt[:, jj], side="right")
+            Xt[:, jj] = np.searchsorted(bin_edges[jj][1:-1], Xt[:, jj], side='right')
 
-        if self.encode == "ordinal":
+        if self.encode == 'ordinal':
             return Xt
 
         dtype_init = None
-        if "onehot" in self.encode:
+        if 'onehot' in self.encode:
             dtype_init = self._encoder.dtype
             self._encoder.dtype = Xt.dtype
         try:
@@ -269,14 +272,14 @@ class KDIQuantizer(TransformerMixin, BaseEstimator):
         """
         check_is_fitted(self)
 
-        if "onehot" in self.encode:
+        if 'onehot' in self.encode:
             X = self._encoder.inverse_transform(X)
 
         Xinv = check_array(X, copy=True, dtype=(np.float64, np.float32))
         n_features = self.n_bins_.shape[0]
         if Xinv.shape[1] != n_features:
             raise ValueError(
-                "Incorrect number of features. Expecting {}, received {}.".format(
+                'Incorrect number of features. Expecting {}, received {}.'.format(
                     n_features, Xinv.shape[1]
                 )
             )
@@ -292,14 +295,14 @@ class KDIQuantizer(TransformerMixin, BaseEstimator):
         rng = check_random_state(random_state)
         check_is_fitted(self)
 
-        if "onehot" in self.encode:
+        if 'onehot' in self.encode:
             X = self._encoder.inverse_transform(X)
 
         Xinv = check_array(X, copy=True, dtype=(np.float64, np.float32))
         n_features = self.n_bins_.shape[0]
         if Xinv.shape[1] != n_features:
             raise ValueError(
-                "Incorrect number of features. Expecting {}, received {}.".format(
+                'Incorrect number of features. Expecting {}, received {}.'.format(
                     n_features, Xinv.shape[1]
                 )
             )
@@ -325,7 +328,7 @@ class KDIQuantizer(TransformerMixin, BaseEstimator):
             - If `input_features` is `None`, then `feature_names_in_` is
               used as feature names in. If `feature_names_in_` is not defined,
               then the following input feature names are generated:
-              `["x0", "x1", ..., "x(n_features_in_ - 1)"]`.
+              `['x0', 'x1', ..., 'x(n_features_in_ - 1)']`.
             - If `input_features` is an array-like, then `input_features` must
               match `feature_names_in_` if `feature_names_in_` is defined.
 
@@ -334,9 +337,9 @@ class KDIQuantizer(TransformerMixin, BaseEstimator):
         feature_names_out : ndarray of str objects
             Transformed feature names.
         """
-        check_is_fitted(self, "n_features_in_")
+        check_is_fitted(self, 'n_features_in_')
         input_features = _check_feature_names_in(self, input_features)
-        if hasattr(self, "_encoder"):
+        if hasattr(self, '_encoder'):
             return self._encoder.get_feature_names_out(input_features)
 
         # ordinal encoding
