@@ -38,8 +38,9 @@ class Baltobot(BaseEstimator):
         As temperature decreases below the default of 1, predictions converge
         to the argmax of each conditional distribution.
 
-    tabpfn: bool
+    tabpfn: bool, or int >= 0
         (Experimental) Whether to use TabPFN instead of XGBoost classifier.
+        If int >= 1, sets TabPFN N_ensemble_configurations.
 
     random_state : int, RandomState instance or None, default=None
         Determines random number generation.
@@ -86,14 +87,14 @@ class Baltobot(BaseEstimator):
         self.right_child_ = None
         self.quantizer_ = KDIQuantizer(n_bins=2, strategy=strategy, random_state=self.random_state)
         self.encoder_ = LabelEncoder()
-        my_xgboost_kwargs = XGBOOST_DEFAULT_KWARGS.copy()
-        my_xgboost_kwargs.update(xgboost_kwargs)
+        my_xgboost_kwargs = XGBOOST_DEFAULT_KWARGS | xgboost_kwargs | {'random_state': self.random_state}
         self.xgber_ = xgb.XGBClassifier(**my_xgboost_kwargs)
 
         if self.tabpfn:
+            assert self.tabpfn > 0
             warnings.warn('Support for TabPFN is experimental.')
             from tabpfn import TabPFNClassifier
-            self.xgber_ = TabPFNClassifier()
+            self.xgber_ = TabPFNClassifier(N_ensemble_configurations=self.tabpfn, seed=42)
 
         self.constant_val_ = None
 
@@ -103,6 +104,7 @@ class Baltobot(BaseEstimator):
                 xgboost_kwargs=xgboost_kwargs,
                 strategy=strategy,
                 softmax_temp=softmax_temp,
+                tabpfn=tabpfn,
                 random_state=self.random_state,
             )
             self.right_child_ = Baltobot(
@@ -110,6 +112,7 @@ class Baltobot(BaseEstimator):
                 xgboost_kwargs=xgboost_kwargs,
                 strategy=strategy,
                 softmax_temp=softmax_temp,
+                tabpfn=tabpfn,
                 random_state=self.random_state,
             )
 
@@ -138,6 +141,7 @@ class Baltobot(BaseEstimator):
             self.constant_val_ = 0.
             return self
         self.constant_val_ = None
+        rng = check_random_state(self.random_state)
 
         if self.tabpfn:
             # Remove all nan rows and columns, in order of highest-missingness
@@ -166,11 +170,15 @@ class Baltobot(BaseEstimator):
 
         if self.tabpfn:
             if X.shape[0] > 1024:
-                rng = check_random_state(self.random_state)
+                warnings.warn(f'TabPFN must shrink from {X.shape[0]} to 1024 samples')
                 sixs = rng.choice(X.shape[0], 1024, replace=False)
-                self.xgber_.fit(X[sixs, :], y_enc[sixs])
+                XX = X[sixs, :]
+                yy_enc = y_enc[sixs]
             else:
-                self.xgber_.fit(X, y_enc)
+                XX = X
+                yy_enc = y_enc
+            XX = np.hstack([XX, rng.normal(size=XX.shape[0]).reshape(-1, 1)])
+            self.xgber_.fit(XX, yy_enc)
         else:
             self.xgber_.fit(X, y_enc)
 
@@ -206,9 +214,12 @@ class Baltobot(BaseEstimator):
             return np.full((n,), fill_value=self.constant_val_)
 
         if self.tabpfn:
-            X = X[:, self.tabpfn_cols_]
+            XX = X[:, self.tabpfn_cols_]
+            XX = np.hstack([XX, rng.normal(size=XX.shape[0]).reshape(-1, 1)])
+            pred_prob = self.xgber_.predict_proba(XX)
+        else:
+            pred_prob = self.xgber_.predict_proba(X)
 
-        pred_prob = self.xgber_.predict_proba(X)
         with np.errstate(divide='ignore'):
             annealed_logits = np.log(pred_prob) / self.softmax_temp
         pred_prob = np.exp(annealed_logits) / np.sum(np.exp(annealed_logits), axis=1, keepdims=True)

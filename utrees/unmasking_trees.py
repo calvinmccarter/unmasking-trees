@@ -1,5 +1,5 @@
-from typing import Union, Optional
 from copy import deepcopy
+from typing import Union, Optional
 import warnings
 
 import numpy as np
@@ -9,6 +9,7 @@ import xgboost as xgb
 from sklearn.base import BaseEstimator
 from sklearn.utils import check_random_state
 from sklearn.preprocessing import LabelEncoder
+from tqdm import tqdm
 
 from utrees.baltobot import Baltobot
 from utrees.kdi_quantizer import KDIQuantizer
@@ -110,6 +111,7 @@ class UnmaskingTrees(BaseEstimator):
         assert strategy in ('kdiquantile', 'quantile', 'uniform', 'kmeans')
         assert 0 < softmax_temp
     
+        self.random_state_ = check_random_state(random_state)
         self.trees_ = None
         self.constant_vals_ = None
         self.quantize_cols_ = None
@@ -294,25 +296,28 @@ class UnmaskingTrees(BaseEstimator):
                 X[np.isnan(X[:, d]), d] = self.constant_vals_[d]
 
         imputedX = np.repeat(X[np.newaxis, :, :], repeats=n_impute, axis=0) # (n_impute, n_samples, n_dims)           
-        for n in range(n_samples):
-            to_unmask = np.where(np.isnan(X[n, :]))[0] # (n_to_unmask,)
-            unmask_ixs = np.repeat(to_unmask[np.newaxis, :], n_impute, axis=0)  # (n_impute, n_to_unmask)
-            unmask_ixs = np.apply_along_axis(rng.permutation, axis=1, arr=unmask_ixs) # (n_impute, n_to_unmask)
-            n_to_unmask = unmask_ixs.shape[1]
-            for kix in range(n_impute):
-                for dix in range(n_to_unmask):
-                    unmask_ix = unmask_ixs[kix, dix]
-                    if self.quantize_cols_[unmask_ix]:
-                        pred_val = self.trees_[unmask_ix].sample(imputedX[kix,[n], :])
-                    else:
-                        pred_probas = self.trees_[unmask_ix].predict_proba(imputedX[kix,[n], :])
-                        with np.errstate(divide='ignore'):
-                            annealed_logits = np.log(pred_probas) / self.softmax_temp
-                        pred_probas = np.exp(annealed_logits) / np.sum(np.exp(annealed_logits), axis=1)
-                        cur_enc = self.encoders_[unmask_ix]
-                        pred_enc = rng.choice(a=len(cur_enc.classes_), p=pred_probas.ravel())
-                        pred_val = cur_enc.inverse_transform(np.array([pred_enc]))
-                    imputedX[kix, n, unmask_ix] = pred_val.item()
+        with tqdm(total=n_samples*n_impute) as pbar:
+            for n in range(n_samples):
+                to_unmask = np.where(np.isnan(X[n, :]))[0] # (n_to_unmask,)
+                unmask_ixs = np.repeat(to_unmask[np.newaxis, :], n_impute, axis=0)  # (n_impute, n_to_unmask)
+                unmask_ixs = np.apply_along_axis(rng.permutation, axis=1, arr=unmask_ixs) # (n_impute, n_to_unmask)
+                n_to_unmask = unmask_ixs.shape[1]
+                for kix in range(n_impute):
+                    pbar.update(1)
+                    for dix in range(n_to_unmask):
+                        unmask_ix = unmask_ixs[kix, dix]
+                        if self.quantize_cols_[unmask_ix]:
+                            pred_val = self.trees_[unmask_ix].sample(imputedX[kix,[n], :])
+                        else:
+                            # TODO: use TabPFN if requested
+                            pred_probas = self.trees_[unmask_ix].predict_proba(imputedX[kix,[n], :])
+                            with np.errstate(divide='ignore'):
+                                annealed_logits = np.log(pred_probas) / self.softmax_temp
+                            pred_probas = np.exp(annealed_logits) / np.sum(np.exp(annealed_logits), axis=1)
+                            cur_enc = self.encoders_[unmask_ix]
+                            pred_enc = rng.choice(a=len(cur_enc.classes_), p=pred_probas.ravel())
+                            pred_val = cur_enc.inverse_transform(np.array([pred_enc]))
+                        imputedX[kix, n, unmask_ix] = pred_val.item()
         return imputedX
 
     def score_samples(

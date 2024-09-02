@@ -43,6 +43,7 @@ configuration = {
         "pandas",
         "scikit-learn >= 0.23",
         "scipy >= 1.0",
+        "tqdm",
         "xgboost",
     ],
     "ext_modules": [],
