@@ -139,7 +139,7 @@ class UnmaskingTrees(BaseEstimator):
         self : object
             Returns the instance itself.
         """
-        rng = check_random_state(self.random_state)
+        rng = check_random_state(self.random_state_)
         assert isinstance(X, np.ndarray)
         self.X_ = X.copy()
         if self.cast_float32:
@@ -225,7 +225,7 @@ class UnmaskingTrees(BaseEstimator):
                     strategy=self.strategy,
                     softmax_temp=self.softmax_temp,
                     tabpfn=self.tabpfn,
-                    random_state=self.random_state,
+                    random_state=self.random_state_,
                 )
                 balto.fit(curX_train, curY_train)
                 self.trees_.append(balto)
@@ -288,7 +288,7 @@ class UnmaskingTrees(BaseEstimator):
         if X is None:
             X = self.X_.copy()
         (n_samples, n_dims) = X.shape
-        rng = check_random_state(self.random_state)
+        rng = check_random_state(self.random_state_)
 
         for d in range(n_dims):
             if self.constant_vals_[d] is not None:
@@ -343,7 +343,7 @@ class UnmaskingTrees(BaseEstimator):
             data.
         """
         (n_samples, n_dims) = X.shape
-        rng = check_random_state(self.random_state)
+        rng = check_random_state(self.random_state_)
 
         density = np.zeros((n_samples,))
         for n in range(n_samples):
