@@ -143,21 +143,6 @@ class Baltobot(BaseEstimator):
         self.constant_val_ = None
         rng = check_random_state(self.random_state)
 
-        if self.tabpfn:
-            # Remove all nan rows and columns, in order of highest-missingness
-            self.tabpfn_cols_ = np.arange(X.shape[1])
-            isnanX = np.isnan(X)
-            while isnanX.sum() > 0:
-                rownans = isnanX.mean(axis=1)  # (n_samples,)
-                colnans = isnanX.mean(axis=0)  # (n_features,)
-                if rownans.max() >= colnans.max():
-                    X = np.delete(X, np.argmax(rownans), axis=0)
-                    y = np.delete(y, np.argmax(rownans), axis=0)
-                else:
-                    X = np.delete(X, np.argmax(colnans), axis=1)
-                    self.tabpfn_cols_ = np.delete(self.tabpfn_cols_, np.argmax(colnans))
-                isnanX = np.isnan(X)
-
         self.quantizer_.fit(y.reshape(-1, 1))
         y_quant = self.quantizer_.transform(y.reshape(-1, 1)).ravel()
         self.encoder_.fit(y_quant)
@@ -175,9 +160,9 @@ class Baltobot(BaseEstimator):
                 XX = X[sixs, :]
                 yy_enc = y_enc[sixs]
             else:
-                XX = X
+                XX = X.copy()
                 yy_enc = y_enc
-            XX = np.hstack([XX, rng.normal(size=XX.shape[0]).reshape(-1, 1)])
+            XX[np.isnan(XX)] = rng.normal(size=XX.shape)[np.isnan(XX)]
             self.xgber_.fit(XX, yy_enc)
         else:
             self.xgber_.fit(X, y_enc)
@@ -207,15 +192,15 @@ class Baltobot(BaseEstimator):
             Samples from the conditional distribution.
         """
 
-        n, d = X.shape
+        n, _ = X.shape
         rng = check_random_state(self.random_state)
 
         if self.constant_val_ is not None:
             return np.full((n,), fill_value=self.constant_val_)
 
         if self.tabpfn:
-            XX = X[:, self.tabpfn_cols_]
-            XX = np.hstack([XX, rng.normal(size=XX.shape[0]).reshape(-1, 1)])
+            XX = X.copy()
+            XX[np.isnan(XX)] = rng.normal(size=XX.shape)[np.isnan(XX)]
             pred_prob = self.xgber_.predict_proba(XX)
         else:
             pred_prob = self.xgber_.predict_proba(X)
@@ -266,10 +251,17 @@ class Baltobot(BaseEstimator):
         """
 
         n, d = X.shape
+        rng = check_random_state(self.random_state)
         if self.constant_val_ is not None:
             return np.log(y == self.constant_val_)
 
-        pred_prob = self.xgber_.predict_proba(X)
+        if self.tabpfn:
+            XX = X.copy()
+            XX[np.isnan(XX)] = rng.normal(size=XX.shape)[np.isnan(XX)]
+            pred_prob = self.xgber_.predict_proba(XX)
+        else:
+            pred_prob = self.xgber_.predict_proba(X)
+
         y_quant = self.quantizer_.transform(y.reshape(-1, 1)).ravel()
         y_enc = self.encoder_.transform(y_quant)
         if self.depth == 0:
