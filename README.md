@@ -9,8 +9,8 @@ To better model conditional distributions which are multi-modal ("modal" as in "
 
 
 <figure>
-  <figcaption><i>Here's how well it works on the Two Moons synthetic dataset, compared to ForestDiffusion:</i></figcaption>
-  <img src="moons-demo.png" alt="drawing" width="600"/>
+  <figcaption><i>Here's how well it works on imputation with the [Two Moons](https://github.com/calvinmccarter/unmasking-trees/blob/master/paper/moons.ipynb) synthetic dataset:</i></figcaption>
+  <img src="paper/moons-imputation.png" alt="drawing" width="600"/>
 </figure>
 
 ## Installation 
@@ -30,7 +30,7 @@ pytest
 
 ## Usage
 
-Check out [this notebook](https://github.com/calvinmccarter/unmasking-trees/blob/master/moons-demo.ipynb) with the Two Moons example, or [this one](https://github.com/calvinmccarter/unmasking-trees/blob/master/iris-demo.ipynb) with the Iris dataset.
+Check out [this notebook](https://github.com/calvinmccarter/unmasking-trees/blob/master/paper/moons.ipynb) with the Two Moons example, or [this one](https://github.com/calvinmccarter/unmasking-trees/blob/master/paper/iris.ipynb) with the Iris dataset.
 
 ### Synthetic data generation
 
@@ -71,13 +71,11 @@ imputeddata = utree.impute(n_impute=5, X=data4impute)  # size (5, 200, 2)
 
 ### Hyperparameters
 
-- n_bins: Number of bins for discretizing continuous features.
+- depth: Depth of balanced binary tree for recursively quantizing each feature.
 - duplicate_K: Number of random masking orders per actual sample. The training dataset will be of size `(n_samples * n_dims * duplicate_K, n_dims)`.
-- top_p: Nucleus sampling parameter for inference.
 - xgboost_kwargs: dict to pass to XGBClassifier.
 - strategy: how to quantize continuous features ('kdiquantile', 'quantile', 'uniform', or 'kmeans').
 - random_state: controls randomness.
-
 
 
 ## Citing this method
