@@ -3,6 +3,7 @@ from copy import deepcopy
 import warnings
 
 import numpy as np
+import scipy.stats as spst
 import xgboost as xgb
 
 from sklearn.base import BaseEstimator
@@ -120,6 +121,7 @@ class Baltobot(BaseEstimator):
         self,
         X: np.ndarray,
         y: np.ndarray,
+        bandwidth: float = None,
     ):
         """Recursively fits balanced tree of boosted tree classifiers.
 
@@ -130,6 +132,9 @@ class Baltobot(BaseEstimator):
 
         y : array-like of shape (n_samples,)
             Continuous target variable of train set.
+
+        bandwidth : float
+            Bandwidth for KDE. If None, computed using Silverman's rule of thumb.
 
         Returns
         -------
@@ -167,20 +172,17 @@ class Baltobot(BaseEstimator):
         else:
             self.xgber_.fit(X, y_enc)
 
+        if bandwidth is None:
+            bandwidth = 0.9 * np.power(y.size, -0.2) * np.minimum(np.std(y), spst.iqr(y)/1.34)
+
         left_ixs = y_enc == 0
         right_ixs = y_enc == 1
         if self.depth > 0:
-            self.left_child_.fit(X[left_ixs, :], y[left_ixs])
-            self.right_child_.fit(X[right_ixs, :], y[right_ixs])
+            self.left_child_.fit(X[left_ixs, :], y[left_ixs], bandwidth=bandwidth)
+            self.right_child_.fit(X[right_ixs, :], y[right_ixs], bandwidth=bandwidth)
         else:
-            self.left_child_ = (
-                np.power(y[left_ixs].size * 3/4, -1/5) * np.sqrt(np.std(y[left_ixs])*np.std(y)),
-                #np.power(y.size * 3/4, -1/5) * np.std(y),
-                y[left_ixs].copy())
-            self.right_child_ = (
-                np.power(y[right_ixs].size * 3/4, -1/5) * np.sqrt(np.std(y[right_ixs])*np.std(y)),
-                #np.power(y.size * 3/4, -1/5) * np.std(y),
-                y[right_ixs].copy())
+            self.left_child_ = (bandwidth, y[left_ixs].copy())
+            self.right_child_ = (bandwidth, y[right_ixs].copy())
         return self
 
     def sample(
