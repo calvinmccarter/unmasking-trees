@@ -167,12 +167,20 @@ class Baltobot(BaseEstimator):
         else:
             self.xgber_.fit(X, y_enc)
 
+        left_ixs = y_enc == 0
+        right_ixs = y_enc == 1
         if self.depth > 0:
-            left_ixs = y_enc == 0
-            right_ixs = y_enc == 1
             self.left_child_.fit(X[left_ixs, :], y[left_ixs])
             self.right_child_.fit(X[right_ixs, :], y[right_ixs])
-
+        else:
+            self.left_child_ = (
+                #np.power(y[left_ixs].size * 3/4, -1/5) * np.sqrt(np.std(y[left_ixs])*np.std(y)),
+                np.power(y.size * 3/4, -1/5) * np.std(y),
+                y[left_ixs].copy())
+            self.right_child_ = (
+                #np.power(y[right_ixs].size * 3/4, -1/5) * np.sqrt(np.std(y[right_ixs])*np.std(y)),
+                np.power(y.size * 3/4, -1/5) * np.std(y),
+                y[right_ixs].copy())
         return self
 
     def sample(
@@ -212,19 +220,21 @@ class Baltobot(BaseEstimator):
         for i in range(n):
             pred_enc[i] = rng.choice(a=len(self.encoder_.classes_), p=pred_prob[i,:])
 
+        left_ixs = pred_enc == 0
+        right_ixs = pred_enc == 1
+        pred_val = np.zeros((n,))
         if self.depth == 0:
-            pred_quant = self.encoder_.inverse_transform(pred_enc)
-            pred_val = self.quantizer_.inverse_transform_sample(pred_quant.reshape(-1, 1))
-            return pred_val.ravel()
+            (left_bw, left_y) = self.left_child_
+            (right_bw, right_y) = self.right_child_
+            left_n, right_n = left_ixs.sum(), right_ixs.sum()
+            pred_val[left_ixs] = rng.choice(left_y, size=left_n) + rng.normal(scale=left_bw, size=left_n)
+            pred_val[right_ixs] = rng.choice(right_y, size=right_n) + rng.normal(scale=right_bw, size=right_n)
         else:
-            left_ixs = pred_enc == 0
-            right_ixs = pred_enc == 1
-            pred_val = np.zeros((n,))
             if left_ixs.sum() > 0:
                 pred_val[left_ixs] = self.left_child_.sample(X[left_ixs, :])
             if right_ixs.sum() > 0:
                 pred_val[right_ixs] = self.right_child_.sample(X[right_ixs, :])
-            return pred_val
+        return pred_val
 
     def score_samples(
         self,
