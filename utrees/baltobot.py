@@ -174,12 +174,12 @@ class Baltobot(BaseEstimator):
             self.right_child_.fit(X[right_ixs, :], y[right_ixs])
         else:
             self.left_child_ = (
-                #np.power(y[left_ixs].size * 3/4, -1/5) * np.sqrt(np.std(y[left_ixs])*np.std(y)),
-                np.power(y.size * 3/4, -1/5) * np.std(y),
+                np.power(y[left_ixs].size * 3/4, -1/5) * np.sqrt(np.std(y[left_ixs])*np.std(y)),
+                #np.power(y.size * 3/4, -1/5) * np.std(y),
                 y[left_ixs].copy())
             self.right_child_ = (
-                #np.power(y[right_ixs].size * 3/4, -1/5) * np.sqrt(np.std(y[right_ixs])*np.std(y)),
-                np.power(y.size * 3/4, -1/5) * np.std(y),
+                np.power(y[right_ixs].size * 3/4, -1/5) * np.sqrt(np.std(y[right_ixs])*np.std(y)),
+                #np.power(y.size * 3/4, -1/5) * np.std(y),
                 y[right_ixs].copy())
         return self
 
