@@ -39,6 +39,7 @@ class BaltoBotModel(ProbabilisticModel, MultiOutputMixin):
         cat_idx: Optional[List[int]] = None,
     ) -> "ProbabilisticModel":
         self.model = utrees.Baltobot(
+            tabpfn=True,
             random_state=self.seed,
             xgboost_kwargs={
                 "subsample": self.subsample,
@@ -51,7 +52,7 @@ class BaltoBotModel(ProbabilisticModel, MultiOutputMixin):
         return self
 
     def predict(self, X: Float[ndarray, "batch x_dim"]) -> Float[ndarray, "batch y_dim"]:
-        y_samples = self.sample(X, n_samples=100)
+        y_samples = self.sample(X, n_samples=50)
         y_samples = y_samples.mean(axis=0)
         return y_samples
 
