@@ -3,14 +3,18 @@
 [![PyPI version](https://badge.fury.io/py/utrees.svg)](https://badge.fury.io/py/utrees)
 [![Downloads](https://static.pepy.tech/badge/utrees)](https://pepy.tech/project/utrees)
 
-UnmaskingTrees is a method for tabular data generation and imputation. It's an order-agnostic autoregressive diffusion model, wherein a training dataset is constructed by incrementally masking features in random order. Per-feature gradient-boosted trees are then trained to unmask each feature. Read more about it in my [blog post](https://calvinmccarter.substack.com/p/unmasking-trees-for-tabular-data)!
+UnmaskingTrees is a method for tabular data generation and imputation. It's an order-agnostic autoregressive diffusion model, wherein a training dataset is constructed by incrementally masking features in random order. Per-feature gradient-boosted trees are then trained to unmask each feature. Read more about it in my [paper](https://arxiv.org/abs/2407.05593)!
 
-To better model conditional distributions which are multi-modal ("modal" as in "modes", not as in "modalities"), we by default discretize continuous features into `n_bins` bins. You can customize this, via the `quantize_cols` parameter in the `fit` method. Provide a list of length `n_dims`, with values in `('continuous', 'categorical', 'integer')`. Given `categorical` it skips quantization of that feature; given `integer` it only quantizes if the number of unique values > `n_bins`.
-
+To better model conditional distributions which are multi-modal ("modal" as in "modes", not as in "modalities"), we hierarchically partition each feature, recursively training XGBoost classifiers at each node of the binary "meta-tree". This approach for conditional modeling of individual features, dubbed BaltoBot, outperforms quantile regression and diffusion-based probabilistic prediction. You can also customize quantization via the `quantize_cols` parameter in the `fit` method. Provide a list of length `n_dims`, with values in `('continuous', 'categorical', 'integer')`. Given `categorical` it currently skips quantization of that feature. 
 
 <figure>
-  <figcaption><i>Here's how well it works on imputation with the [Two Moons](https://github.com/calvinmccarter/unmasking-trees/blob/master/paper/moons.ipynb) synthetic dataset:</i></figcaption>
-  <img src="paper/moons-imputation.png" alt="drawing" width="600"/>
+  <figcaption><i>Here's how well <a href="https://github.com/calvinmccarter/unmasking-trees/blob/master/paper/moons.ipynb">UnmaskingTrees works</a> on imputation with the Two Moons synthetic dataset:</i></figcaption>
+  <img src="paper/moons-imputation.png" alt="drawing" width="500"/>
+</figure>
+
+<figure>
+  <figcaption><i>Here's how well <a href="https://github.com/calvinmccarter/unmasking-trees/blob/master/paper/wave.ipynb">BaltoBot works</a> on probabilistic prediction:</i></figcaption>
+  <img src="paper/wave-baltobot-readme.jpg" alt="drawing" width="500"/>
 </figure>
 
 ## Installation 
