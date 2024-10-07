@@ -5,7 +5,7 @@ import warnings
 import numpy as np
 import xgboost as xgb
 
-from sklearn.base import BaseEstimator
+from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.preprocessing import LabelEncoder
 from sklearn.utils import check_random_state
 
@@ -16,6 +16,62 @@ XGBOOST_DEFAULT_KWARGS = {
     'verbosity' : 1,
     'objective' : 'binary:logistic',
 }
+
+
+class NanTabPFNClassifier(BaseEstimator, ClassifierMixin):
+    def __init__(
+        self,
+        N_ensemble_configurations,
+        seed,
+    ):
+        from tabpfn import TabPFNClassifier
+        self.tabpfn = TabPFNClassifier(N_ensemble_configurations=N_ensemble_configurations, seed=seed)
+        self.rng = check_random_state(seed)
+
+    def fit(
+        self,
+        X,
+        y,
+    ):
+        self.Xtrain = X.copy()
+        self.ytrain = y.copy()
+        return self
+
+    def predict_proba(
+        self,
+        X,
+    ):
+        n_test, d = X.shape
+        pred_probas = np.zeros((n_test, 2), dtype=X.dtype)
+
+        obsXtest = ~np.isnan(X)
+        obsXtrain = ~np.isnan(self.Xtrain)
+        obs_patterns = np.unique(obsXtest, axis=0)
+        n_patterns = obs_patterns.shape[0]
+        for pix in range(n_patterns):
+            isobs = obs_patterns[[pix], :]
+            obs_ixs = isobs.ravel().nonzero()[0]
+            test_ixs = (obsXtest == isobs).all(axis=1).nonzero()[0]
+            train_ixs = (obsXtrain | ~isobs).all(axis=1).nonzero()[0]
+            if isobs.sum() == 0:
+                curXtrain = np.zeros((self.Xtrain.shape[0], 1))
+                curytrain = self.ytrain
+                curXtest = np.zeros((X[test_ixs, :].shape[0], 1))
+            else:
+                curXtrain = self.Xtrain[np.ix_(train_ixs, obs_ixs)]
+                curytrain = self.ytrain[train_ixs]
+                curXtest = X[np.ix_(test_ixs, obs_ixs)]
+
+            if curXtrain.shape[0] > 1024:
+                #warnings.warn(f'TabPFN must shrink from {curXtrain.shape[0]} to 1024 samples')
+                sixs = self.rng.choice(curXtrain.shape[0], 1024, replace=False)
+                curXtrain = curXtrain[sixs, :]
+                curytrain = curytrain[sixs]
+            self.tabpfn.fit(curXtrain, curytrain)
+
+            cur_pred_prob = self.tabpfn.predict_proba(curXtest)
+            pred_probas[test_ixs, :] = cur_pred_prob
+        return pred_probas
 
 
 class Baltobot(BaseEstimator):
@@ -93,8 +149,7 @@ class Baltobot(BaseEstimator):
         if self.tabpfn:
             assert self.tabpfn > 0
             warnings.warn('Support for TabPFN is experimental.')
-            from tabpfn import TabPFNClassifier
-            self.xgber_ = TabPFNClassifier(N_ensemble_configurations=self.tabpfn, seed=42)
+            self.xgber_ = NanTabPFNClassifier(N_ensemble_configurations=self.tabpfn, seed=42)
 
         self.constant_val_ = None
 
@@ -153,19 +208,7 @@ class Baltobot(BaseEstimator):
             return self
         y_enc = self.encoder_.transform(y_quant)
 
-        if self.tabpfn:
-            if X.shape[0] > 1024:
-                warnings.warn(f'TabPFN must shrink from {X.shape[0]} to 1024 samples')
-                sixs = rng.choice(X.shape[0], 1024, replace=False)
-                XX = X[sixs, :]
-                yy_enc = y_enc[sixs]
-            else:
-                XX = X.copy()
-                yy_enc = y_enc
-            XX[np.isnan(XX)] = rng.normal(size=XX.shape)[np.isnan(XX)]
-            self.xgber_.fit(XX, yy_enc)
-        else:
-            self.xgber_.fit(X, y_enc)
+        self.xgber_.fit(X, y_enc)
 
         if self.depth > 0:
             left_ixs = y_enc == 0
@@ -198,12 +241,7 @@ class Baltobot(BaseEstimator):
         if self.constant_val_ is not None:
             return np.full((n,), fill_value=self.constant_val_)
 
-        if self.tabpfn:
-            XX = X.copy()
-            XX[np.isnan(XX)] = rng.normal(size=XX.shape)[np.isnan(XX)]
-            pred_prob = self.xgber_.predict_proba(XX)
-        else:
-            pred_prob = self.xgber_.predict_proba(X)
+        pred_prob = self.xgber_.predict_proba(X)
 
         with np.errstate(divide='ignore'):
             annealed_logits = np.log(pred_prob) / self.softmax_temp
