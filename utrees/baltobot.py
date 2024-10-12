@@ -41,8 +41,10 @@ class NanTabPFNClassifier(BaseEstimator, ClassifierMixin):
         self,
         X,
     ):
+        dtype = self.Xtrain.dtype
+        X = X.astype(dtype)
         n_test, d = X.shape
-        pred_probas = np.zeros((n_test, 2), dtype=X.dtype)
+        pred_probas = np.zeros((n_test, 2), dtype=dtype)
 
         obsXtest = ~np.isnan(X)
         obsXtrain = ~np.isnan(self.Xtrain)
@@ -54,9 +56,9 @@ class NanTabPFNClassifier(BaseEstimator, ClassifierMixin):
             test_ixs = (obsXtest == isobs).all(axis=1).nonzero()[0]
             train_ixs = (obsXtrain | ~isobs).all(axis=1).nonzero()[0]
             if isobs.sum() == 0:
-                curXtrain = np.zeros((self.Xtrain.shape[0], 1))
+                curXtrain = np.zeros((self.Xtrain.shape[0], 1), dtype=dtype)
                 curytrain = self.ytrain
-                curXtest = np.zeros((X[test_ixs, :].shape[0], 1))
+                curXtest = np.zeros((X[test_ixs, :].shape[0], 1), dtype=dtype)
             else:
                 curXtrain = self.Xtrain[np.ix_(train_ixs, obs_ixs)]
                 curytrain = self.ytrain[train_ixs]
@@ -67,10 +69,15 @@ class NanTabPFNClassifier(BaseEstimator, ClassifierMixin):
                 sixs = self.rng.choice(curXtrain.shape[0], 1024, replace=False)
                 curXtrain = curXtrain[sixs, :]
                 curytrain = curytrain[sixs]
-            self.tabpfn.fit(curXtrain, curytrain)
-
-            cur_pred_prob = self.tabpfn.predict_proba(curXtest)
-            pred_probas[test_ixs, :] = cur_pred_prob
+            if curXtrain.shape[0] == 0:
+                pred_probas[test_ixs, :] = 0.5
+            elif np.unique(curytrain).shape[0] == 1:
+                # Removing missingness might make us only see one label
+                pred_probas[test_ixs, curytrain[0]] = 1.
+            else:
+                self.tabpfn.fit(curXtrain, curytrain)
+                cur_pred_prob = self.tabpfn.predict_proba(curXtest)
+                pred_probas[test_ixs, :] = cur_pred_prob
         return pred_probas
 
 
@@ -148,7 +155,6 @@ class Baltobot(BaseEstimator):
 
         if self.tabpfn:
             assert self.tabpfn > 0
-            warnings.warn('Support for TabPFN is experimental.')
             self.xgber_ = NanTabPFNClassifier(N_ensemble_configurations=self.tabpfn, seed=42)
 
         self.constant_val_ = None
