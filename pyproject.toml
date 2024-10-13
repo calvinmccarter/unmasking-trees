@@ -1,13 +1,12 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "utrees"
-dynamic = ["version"]
+version = "0.3.0"
 description = "Unmasking trees for tabular data generation and imputation"
 readme = "README.md"
-license = ""
 authors = [
     { name = "Calvin McCarter", email = "mccarter.calvin@gmail.com" },
 ]
@@ -49,11 +48,3 @@ dependencies = [
 
 [project.urls]
 Homepage = "http://github.com/calvinmccarter/unmasking-trees"
-
-[tool.hatch.version]
-path = "utrees/__init__.py"
-
-[tool.hatch.build.targets.sdist]
-include = [
-    "/utrees",
-]

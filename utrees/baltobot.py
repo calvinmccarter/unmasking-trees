@@ -21,8 +21,8 @@ XGBOOST_DEFAULT_KWARGS = {
 class NanTabPFNClassifier(BaseEstimator, ClassifierMixin):
     def __init__(
         self,
-        N_ensemble_configurations,
-        seed,
+        N_ensemble_configurations=3,
+        seed=0,
     ):
         from tabpfn import TabPFNClassifier
         self.tabpfn = TabPFNClassifier(N_ensemble_configurations=N_ensemble_configurations, seed=seed)
@@ -55,17 +55,14 @@ class NanTabPFNClassifier(BaseEstimator, ClassifierMixin):
             test_ixs = (obsXtest == isobs).all(axis=1).nonzero()[0]
             obs_ixs = isobs.ravel().nonzero()[0]
             train_ixs = (obsXtrain | ~isobs).all(axis=1).nonzero()[0]
-            """
             while train_ixs.shape[0] == 0:
                 # No training example covers the observed features in this test example.
-                # This should be ultra-rare, but we handle it anyways.
+                # This should be rare, but we handle it anyways.
                 # We introduce fake missingness into test until training covers it.
-                print("here", pix)
-                isobs[self.rng.choice(obs_ixs)] = False
+                isobs[0, self.rng.choice(obs_ixs)] = False
                 obs_ixs = isobs.ravel().nonzero()[0]
                 train_ixs = (obsXtrain | ~isobs).all(axis=1).nonzero()[0]
-            """
-            if obs_ixs.shape[0] == 0:
+            if isobs.sum() == 0:
                 curXtrain = np.zeros((self.Xtrain.shape[0], 1), dtype=dtype)
                 curytrain = self.ytrain
                 curXtest = np.zeros((X[test_ixs, :].shape[0], 1), dtype=dtype)
@@ -78,13 +75,10 @@ class NanTabPFNClassifier(BaseEstimator, ClassifierMixin):
                 sixs = self.rng.choice(curXtrain.shape[0], 1024, replace=False)
                 curXtrain = curXtrain[sixs, :]
                 curytrain = curytrain[sixs]
-            elif np.unique(curytrain).shape[0] == 1:
+            if np.unique(curytrain).shape[0] == 1:
                 # Removing missingness might make us only see one label
                 pred_probas[test_ixs, curytrain[0]] = 1.
             else:
-                assert np.isnan(curXtrain).sum() == 0
-                assert np.isnan(curytrain).sum() == 0
-                assert np.isnan(curXtest).sum() == 0
                 self.tabpfn.fit(curXtrain, curytrain)
                 cur_pred_prob = self.tabpfn.predict_proba(curXtest)
                 pred_probas[test_ixs, :] = cur_pred_prob
