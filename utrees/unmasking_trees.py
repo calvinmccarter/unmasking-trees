@@ -16,21 +16,21 @@ from utrees.kdi_quantizer import KDIQuantizer
 
 
 XGBOOST_DEFAULT_KWARGS = {
-    'tree_method' : 'hist',
-    'verbosity' : 1,
-    'objective' : 'binary:logistic',
+    "tree_method": "hist",
+    "verbosity": 1,
+    "objective": "binary:logistic",
 }
 
 TABPFN_DEFAULT_KWARGS = {
-    'seed': 42,
-    'batch_size_inference' : 1,
-    'subsample_features' : True,
+    "seed": 42,
+    "batch_size_inference": 1,
+    "subsample_features": True,
 }
 
 
 class UnmaskingTrees(BaseEstimator):
     """Performs generative modeling and multiple imputation on tabular data.
-    
+
     This method generates training data by iteratively masking samples,
     then training per-feature XGBoost models to unmask the data.
 
@@ -68,7 +68,7 @@ class UnmaskingTrees(BaseEstimator):
     Attributes
     ----------
     trees_ : list of Baltobot or XGBClassifier
-        Fitted per-feature sampling models. For each column ix, this 
+        Fitted per-feature sampling models. For each column ix, this
         will be Baltobot if quantize_cols_[ix], and XGBClassifier otherwise.
 
     constant_vals_ : list of float or None, with length n_dims
@@ -90,16 +90,17 @@ class UnmaskingTrees(BaseEstimator):
         Input data.
 
     """
+
     def __init__(
         self,
         depth: int = 4,
         duplicate_K: int = 50,
         clf_kwargs: dict = {},
-        strategy: str = 'kdiquantile',
-        softmax_temp: float = 1.,
+        strategy: str = "kdiquantile",
+        softmax_temp: float = 1.0,
         cast_float32: bool = True,
         tabpfn: bool = False,
-        random_state = None,
+        random_state=None,
     ):
         self.depth = depth
         self.duplicate_K = duplicate_K
@@ -117,9 +118,9 @@ class UnmaskingTrees(BaseEstimator):
         self.clf_kwargs_.update(clf_kwargs)
 
         assert 1 <= duplicate_K
-        assert strategy in ('kdiquantile', 'quantile', 'uniform', 'kmeans')
+        assert strategy in ("kdiquantile", "quantile", "uniform", "kmeans")
         assert 0 < softmax_temp
-    
+
         self.random_state_ = check_random_state(random_state)
         self.trees_ = None
         self.constant_vals_ = None
@@ -130,7 +131,7 @@ class UnmaskingTrees(BaseEstimator):
     def fit(
         self,
         X: np.ndarray,
-        quantize_cols: Union[str, list] = 'all',
+        quantize_cols: Union[str, list] = "all",
     ):
         """
         Fit the estimator.
@@ -159,22 +160,22 @@ class UnmaskingTrees(BaseEstimator):
             assert len(quantize_cols) == n_dims
             self.quantize_cols_ = []
             for d, elt in enumerate(quantize_cols):
-                if elt == 'continuous':
+                if elt == "continuous":
                     self.quantize_cols_.append(True)
-                elif elt == 'categorical':
+                elif elt == "categorical":
                     self.quantize_cols_.append(False)
-                elif elt == 'integer':
+                elif elt == "integer":
                     self.quantize_cols_.append(True)
                 else:
-                    assert elt in ('continuous', 'categorical', 'integer')
-        elif quantize_cols == 'none':
+                    assert elt in ("continuous", "categorical", "integer")
+        elif quantize_cols == "none":
             self.quantize_cols_ = [False] * n_dims
-        elif quantize_cols == 'all':
+        elif quantize_cols == "all":
             self.quantize_cols_ = [True] * n_dims
         else:
-            raise ValueError(f'unexpected quantize_cols: {quantize_cols}')
+            raise ValueError(f"unexpected quantize_cols: {quantize_cols}")
         self.quantize_cols = deepcopy(quantize_cols)
-        
+
         # Find features with constant vals, to be unmasked before training and inference
         self.constant_vals_ = []
         for d in range(n_dims):
@@ -199,7 +200,9 @@ class UnmaskingTrees(BaseEstimator):
         Y_train = []
         for dupix in range(self.duplicate_K):
             mask_ixs = np.repeat(np.arange(n_dims)[np.newaxis, :], n_samples, axis=0)
-            mask_ixs = np.apply_along_axis(rng.permutation, axis=1, arr=mask_ixs) # n_samples, n_dims
+            mask_ixs = np.apply_along_axis(
+                rng.permutation, axis=1, arr=mask_ixs
+            )  # n_samples, n_dims
             for n in range(n_samples):
                 fuller_X = X[n, :]
                 for d in range(n_dims):
@@ -305,27 +308,43 @@ class UnmaskingTrees(BaseEstimator):
                 # Only replace nans with constant vals, because this is impute, ya know
                 X[np.isnan(X[:, d]), d] = self.constant_vals_[d]
 
-        imputedX = np.repeat(X[np.newaxis, :, :], repeats=n_impute, axis=0) # (n_impute, n_samples, n_dims)           
-        with tqdm(total=n_samples*n_impute) as pbar:
+        imputedX = np.repeat(
+            X[np.newaxis, :, :], repeats=n_impute, axis=0
+        )  # (n_impute, n_samples, n_dims)
+        with tqdm(total=n_samples * n_impute) as pbar:
             for n in range(n_samples):
-                to_unmask = np.where(np.isnan(X[n, :]))[0] # (n_to_unmask,)
-                unmask_ixs = np.repeat(to_unmask[np.newaxis, :], n_impute, axis=0)  # (n_impute, n_to_unmask)
-                unmask_ixs = np.apply_along_axis(rng.permutation, axis=1, arr=unmask_ixs) # (n_impute, n_to_unmask)
+                to_unmask = np.where(np.isnan(X[n, :]))[0]  # (n_to_unmask,)
+                unmask_ixs = np.repeat(
+                    to_unmask[np.newaxis, :], n_impute, axis=0
+                )  # (n_impute, n_to_unmask)
+                unmask_ixs = np.apply_along_axis(
+                    rng.permutation, axis=1, arr=unmask_ixs
+                )  # (n_impute, n_to_unmask)
                 n_to_unmask = unmask_ixs.shape[1]
                 for kix in range(n_impute):
                     pbar.update(1)
                     for dix in range(n_to_unmask):
                         unmask_ix = unmask_ixs[kix, dix]
                         if self.quantize_cols_[unmask_ix]:
-                            pred_val = self.trees_[unmask_ix].sample(imputedX[kix,[n], :])
+                            pred_val = self.trees_[unmask_ix].sample(
+                                imputedX[kix, [n], :]
+                            )
                         else:
                             # TODO: use TabPFN if requested
-                            pred_probas = self.trees_[unmask_ix].predict_proba(imputedX[kix,[n], :])
-                            with np.errstate(divide='ignore'):
-                                annealed_logits = np.log(pred_probas) / self.softmax_temp
-                            pred_probas = np.exp(annealed_logits) / np.sum(np.exp(annealed_logits), axis=1)
+                            pred_probas = self.trees_[unmask_ix].predict_proba(
+                                imputedX[kix, [n], :]
+                            )
+                            with np.errstate(divide="ignore"):
+                                annealed_logits = (
+                                    np.log(pred_probas) / self.softmax_temp
+                                )
+                            pred_probas = np.exp(annealed_logits) / np.sum(
+                                np.exp(annealed_logits), axis=1
+                            )
                             cur_enc = self.encoders_[unmask_ix]
-                            pred_enc = rng.choice(a=len(cur_enc.classes_), p=pred_probas.ravel())
+                            pred_enc = rng.choice(
+                                a=len(cur_enc.classes_), p=pred_probas.ravel()
+                            )
                             pred_val = cur_enc.inverse_transform(np.array([pred_enc]))
                         imputedX[kix, n, unmask_ix] = pred_val.item()
         return imputedX
@@ -367,7 +386,9 @@ class UnmaskingTrees(BaseEstimator):
                         evalX[:, eval_order[dix:]] = np.nan
                         evaly = X[[n], eval_ix]
                         if self.quantize_cols_[eval_ix]:
-                            cur_density[k] += self.trees_[eval_ix].score_samples(evalX, evaly).item()
+                            cur_density[k] += (
+                                self.trees_[eval_ix].score_samples(evalX, evaly).item()
+                            )
                         else:
                             probas = self.trees_[eval_ix].predict_proba(evalX).ravel()
                             cur_enc = self.encoders_[eval_ix]

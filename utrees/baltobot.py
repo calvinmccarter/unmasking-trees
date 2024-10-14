@@ -12,16 +12,16 @@ from sklearn.utils import check_random_state
 from utrees.kdi_quantizer import KDIQuantizer
 
 XGBOOST_DEFAULT_KWARGS = {
-    'tree_method' : 'hist',
-    'verbosity' : 1,
-    'objective' : 'binary:logistic',
+    "tree_method": "hist",
+    "verbosity": 1,
+    "objective": "binary:logistic",
 }
 
 TABPFN_DEFAULT_KWARGS = {
-    'N_ensemble_configurations': 1,
-    'seed': 42,
-    'batch_size_inference' : 1,
-    'subsample_features' : True,
+    "N_ensemble_configurations": 1,
+    "seed": 42,
+    "batch_size_inference": 1,
+    "subsample_features": True,
 }
 
 
@@ -33,6 +33,7 @@ class NanTabPFNClassifier(BaseEstimator, ClassifierMixin):
     ):
         # We do not import this at the top, because Python dependencies are a nightmare.
         from tabpfn import TabPFNClassifier
+
         self.tabpfn = TabPFNClassifier(**tabpfn_kwargs)
         self.rng = check_random_state(random_state)
 
@@ -79,13 +80,13 @@ class NanTabPFNClassifier(BaseEstimator, ClassifierMixin):
                 curytrain = self.ytrain[train_ixs]
                 curXtest = X[np.ix_(test_ixs, obs_ixs)]
             if curXtrain.shape[0] > 1024:
-                #warnings.warn(f'TabPFN must shrink from {curXtrain.shape[0]} to 1024 samples')
+                # warnings.warn(f'TabPFN must shrink from {curXtrain.shape[0]} to 1024 samples')
                 sixs = self.rng.choice(curXtrain.shape[0], 1024, replace=False)
                 curXtrain = curXtrain[sixs, :]
                 curytrain = curytrain[sixs]
             if np.unique(curytrain).shape[0] == 1:
                 # Removing missingness might make us only see one label
-                pred_probas[test_ixs, curytrain[0]] = 1.
+                pred_probas[test_ixs, curytrain[0]] = 1.0
             else:
                 self.tabpfn.fit(curXtrain, curytrain)
                 cur_pred_prob = self.tabpfn.predict_proba(curXtest)
@@ -143,10 +144,10 @@ class Baltobot(BaseEstimator):
         self,
         depth: int = 4,
         clf_kwargs: dict = {},
-        strategy: str = 'kdiquantile',
-        softmax_temp: float = 1.,
+        strategy: str = "kdiquantile",
+        softmax_temp: float = 1.0,
         tabpfn: bool = False,
-        random_state = None,
+        random_state=None,
     ):
 
         self.depth = depth
@@ -159,9 +160,13 @@ class Baltobot(BaseEstimator):
 
         self.left_child_ = None
         self.right_child_ = None
-        self.quantizer_ = KDIQuantizer(n_bins=2, strategy=strategy, random_state=self.random_state)
+        self.quantizer_ = KDIQuantizer(
+            n_bins=2, strategy=strategy, random_state=self.random_state
+        )
         self.encoder_ = LabelEncoder()
-        my_kwargs = XGBOOST_DEFAULT_KWARGS | clf_kwargs | {'random_state': self.random_state}
+        my_kwargs = (
+            XGBOOST_DEFAULT_KWARGS | clf_kwargs | {"random_state": self.random_state}
+        )
         self.clfer_ = xgb.XGBClassifier(**my_kwargs)
 
         if self.tabpfn:
@@ -211,7 +216,7 @@ class Baltobot(BaseEstimator):
 
         assert np.isnan(y).sum() == 0
         if y.size == 0:
-            self.constant_val_ = 0.
+            self.constant_val_ = 0.0
             return self
         self.constant_val_ = None
         rng = check_random_state(self.random_state)
@@ -261,16 +266,20 @@ class Baltobot(BaseEstimator):
 
         pred_prob = self.clfer_.predict_proba(X)
 
-        with np.errstate(divide='ignore'):
+        with np.errstate(divide="ignore"):
             annealed_logits = np.log(pred_prob) / self.softmax_temp
-        pred_prob = np.exp(annealed_logits) / np.sum(np.exp(annealed_logits), axis=1, keepdims=True)
+        pred_prob = np.exp(annealed_logits) / np.sum(
+            np.exp(annealed_logits), axis=1, keepdims=True
+        )
         pred_enc = np.zeros((n,), dtype=int)
         for i in range(n):
-            pred_enc[i] = rng.choice(a=len(self.encoder_.classes_), p=pred_prob[i,:])
+            pred_enc[i] = rng.choice(a=len(self.encoder_.classes_), p=pred_prob[i, :])
 
         if self.depth == 0:
             pred_quant = self.encoder_.inverse_transform(pred_enc)
-            pred_val = self.quantizer_.inverse_transform_sample(pred_quant.reshape(-1, 1))
+            pred_val = self.quantizer_.inverse_transform_sample(
+                pred_quant.reshape(-1, 1)
+            )
             return pred_val.ravel()
         else:
             left_ixs = pred_enc == 0
@@ -335,10 +344,14 @@ class Baltobot(BaseEstimator):
             right_ixs = y_enc == 1
             scores = np.zeros((n,))
             if left_ixs.sum() > 0:
-                left_scores = self.left_child_.score_samples(X[left_ixs, :], y[left_ixs])
+                left_scores = self.left_child_.score_samples(
+                    X[left_ixs, :], y[left_ixs]
+                )
                 scores[left_ixs] = np.log(pred_prob[left_ixs, 0]) + left_scores
             if right_ixs.sum() > 0:
-                right_scores = self.right_child_.score_samples(X[right_ixs, :], y[right_ixs])
+                right_scores = self.right_child_.score_samples(
+                    X[right_ixs, :], y[right_ixs]
+                )
                 scores[right_ixs] = np.log(pred_prob[right_ixs, 1]) + right_scores
             return scores
 
