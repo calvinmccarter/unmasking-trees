@@ -24,8 +24,13 @@ class NanTabPFNClassifier(BaseEstimator, ClassifierMixin):
         N_ensemble_configurations=3,
         seed=0,
     ):
+        # We do not import this at the top, because Python dependencies are a nightmare.
         from tabpfn import TabPFNClassifier
-        self.tabpfn = TabPFNClassifier(N_ensemble_configurations=N_ensemble_configurations, seed=seed)
+        self.tabpfn = TabPFNClassifier(
+            N_ensemble_configurations=N_ensemble_configurations,
+            seed=seed,
+            subsample_features=True,
+        )
         self.rng = check_random_state(seed)
 
     def fit(
