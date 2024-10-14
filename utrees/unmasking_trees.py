@@ -11,14 +11,20 @@ from sklearn.utils import check_random_state
 from sklearn.preprocessing import LabelEncoder
 from tqdm import tqdm
 
-from utrees.baltobot import Baltobot
+from utrees.baltobot import Baltobot, NanTabPFNClassifier
 from utrees.kdi_quantizer import KDIQuantizer
 
 
 XGBOOST_DEFAULT_KWARGS = {
     'tree_method' : 'hist',
     'verbosity' : 1,
-    'objective' : 'multi:softprob',
+    'objective' : 'binary:logistic',
+}
+
+TABPFN_DEFAULT_KWARGS = {
+    'seed': 42,
+    'batch_size_inference' : 1,
+    'subsample_features' : True,
 }
 
 
@@ -38,8 +44,8 @@ class UnmaskingTrees(BaseEstimator):
         Number of random masking orders per actual sample.
         The training dataset will be of size (n_samples * n_dims * duplicate_K, n_dims).
 
-    xgboost_kwargs : dict
-        Arguments for XGBoost classifier.
+    clf_kwargs : dict
+        Arguments for XGBoost (or TabPFN) classifier.
 
     strategy : 'kdiquantile', 'quantile', 'uniform', 'kmeans'
         The quantization strategy for discretizing continuous features.
@@ -50,7 +56,7 @@ class UnmaskingTrees(BaseEstimator):
         to the argmax of each conditional distribution.
 
     tabpfn: bool
-        (Experimental) Whether to use TabPFN instead of XGBoost classifier.
+        Whether to use TabPFN instead of XGBoost classifier.
 
     cast_float32: bool
         Whether to always convert inputs to float32.
@@ -77,8 +83,8 @@ class UnmaskingTrees(BaseEstimator):
     encoders_ : list of None or LabelEncoder
         Preprocessors for non-continuous features.
 
-    xgboost_kwargs_ : 
-        Args passed to XGBClassifier.
+    clf_kwargs_ : dict
+        Args passed to XGBClassifier or NanTabPFNClassifier.
 
     X_ : np.ndarray (n_samples, n_dims)
         Input data.
@@ -88,7 +94,7 @@ class UnmaskingTrees(BaseEstimator):
         self,
         depth: int = 4,
         duplicate_K: int = 50,
-        xgboost_kwargs: dict = {},
+        clf_kwargs: dict = {},
         strategy: str = 'kdiquantile',
         softmax_temp: float = 1.,
         cast_float32: bool = True,
@@ -97,17 +103,20 @@ class UnmaskingTrees(BaseEstimator):
     ):
         self.depth = depth
         self.duplicate_K = duplicate_K
-        self.xgboost_kwargs = xgboost_kwargs
-        self.xgboost_kwargs_ = XGBOOST_DEFAULT_KWARGS.copy()
-        self.xgboost_kwargs_.update(xgboost_kwargs)
+        self.clf_kwargs = clf_kwargs
         self.strategy = strategy
         self.softmax_temp = softmax_temp
         self.cast_float32 = cast_float32
         self.tabpfn = tabpfn
         self.random_state = random_state
 
+        if self.tabpfn:
+            self.clf_kwargs_ = TABPFN_DEFAULT_KWARGS.copy()
+        else:
+            self.clf_kwargs_ = XGBOOST_DEFAULT_KWARGS.copy()
+        self.clf_kwargs_.update(clf_kwargs)
+
         assert 1 <= duplicate_K
-        assert self.xgboost_kwargs_['objective'] in ('binary:logistic', 'multi:softprob')
         assert strategy in ('kdiquantile', 'quantile', 'uniform', 'kmeans')
         assert 0 < softmax_temp
     
@@ -221,7 +230,7 @@ class UnmaskingTrees(BaseEstimator):
                 curY_train = Y_train[train_ixs, d]
                 balto = Baltobot(
                     depth=self.depth,
-                    xgboost_kwargs=self.xgboost_kwargs,
+                    clf_kwargs=self.clf_kwargs,
                     strategy=self.strategy,
                     softmax_temp=self.softmax_temp,
                     tabpfn=self.tabpfn,
@@ -231,12 +240,13 @@ class UnmaskingTrees(BaseEstimator):
                 self.trees_.append(balto)
             else:
                 curY_train = self.encoders_[d].transform(Y_train[train_ixs, d])
-                my_xgboost_kwargs = dict(**self.xgboost_kwargs_)
-                if len(np.unique(curY_train)) == 2:
-                    my_xgboost_kwargs['objective'] = 'binary:logistic'
-                xgber = xgb.XGBClassifier(**my_xgboost_kwargs)
-                xgber.fit(curX_train, curY_train)
-                self.trees_.append(xgber)
+                if self.tabpfn:
+                    clfer = NanTabPFNClassifier(**self.clf_kwargs)
+                else:
+                    clfer = xgb.XGBClassifier(**self.clf_kwargs)
+
+                clfer.fit(curX_train, curY_train)
+                self.trees_.append(clfer)
         return self
 
     def generate(

@@ -17,21 +17,24 @@ XGBOOST_DEFAULT_KWARGS = {
     'objective' : 'binary:logistic',
 }
 
+TABPFN_DEFAULT_KWARGS = {
+    'N_ensemble_configurations': 1,
+    'seed': 42,
+    'batch_size_inference' : 1,
+    'subsample_features' : True,
+}
+
 
 class NanTabPFNClassifier(BaseEstimator, ClassifierMixin):
     def __init__(
         self,
-        N_ensemble_configurations=3,
-        seed=0,
+        random_state=None,
+        **tabpfn_kwargs,
     ):
         # We do not import this at the top, because Python dependencies are a nightmare.
         from tabpfn import TabPFNClassifier
-        self.tabpfn = TabPFNClassifier(
-            N_ensemble_configurations=N_ensemble_configurations,
-            seed=seed,
-            subsample_features=True,
-        )
-        self.rng = check_random_state(seed)
+        self.tabpfn = TabPFNClassifier(**tabpfn_kwargs)
+        self.rng = check_random_state(random_state)
 
     def fit(
         self,
@@ -99,8 +102,8 @@ class Baltobot(BaseEstimator):
         Depth of balanced binary tree for recursively quantizing each feature.
         The total number of quantization bins is 2^depth.
 
-    xgboost_kwargs : dict
-        Arguments for XGBoost classifier.
+    clf_kwargs : dict
+        Arguments for XGBoost (or TabPFN) classifier.
 
     strategy : 'kdiquantile', 'quantile', 'uniform', 'kmeans'
         The quantization strategy for discretizing continuous features.
@@ -111,8 +114,7 @@ class Baltobot(BaseEstimator):
         to the argmax of each conditional distribution.
 
     tabpfn: bool, or int >= 0
-        (Experimental) Whether to use TabPFN instead of XGBoost classifier.
-        If int >= 1, sets TabPFN N_ensemble_configurations.
+        Whether to use TabPFN instead of XGBoost classifier.
 
     random_state : int, RandomState instance or None, default=None
         Determines random number generation.
@@ -130,7 +132,7 @@ class Baltobot(BaseEstimator):
     encoder_ : LabelEncoder
         Maps bin (float) to label (int). Almost always 2 classes.
 
-    xgber_ : XGBClassifier
+    clfer_ : XGBClassifier
         Binary classifier that tell us whether to go left or right bin.
 
     left_child_, right_child_ : Baltobot
@@ -140,7 +142,7 @@ class Baltobot(BaseEstimator):
     def __init__(
         self,
         depth: int = 4,
-        xgboost_kwargs: dict = {},
+        clf_kwargs: dict = {},
         strategy: str = 'kdiquantile',
         softmax_temp: float = 1.,
         tabpfn: bool = False,
@@ -148,7 +150,7 @@ class Baltobot(BaseEstimator):
     ):
 
         self.depth = depth
-        self.xgboost_kwargs = xgboost_kwargs
+        self.clf_kwargs = clf_kwargs
         self.strategy = strategy
         self.softmax_temp = softmax_temp
         self.tabpfn = tabpfn
@@ -159,19 +161,20 @@ class Baltobot(BaseEstimator):
         self.right_child_ = None
         self.quantizer_ = KDIQuantizer(n_bins=2, strategy=strategy, random_state=self.random_state)
         self.encoder_ = LabelEncoder()
-        my_xgboost_kwargs = XGBOOST_DEFAULT_KWARGS | xgboost_kwargs | {'random_state': self.random_state}
-        self.xgber_ = xgb.XGBClassifier(**my_xgboost_kwargs)
+        my_kwargs = XGBOOST_DEFAULT_KWARGS | clf_kwargs | {'random_state': self.random_state}
+        self.clfer_ = xgb.XGBClassifier(**my_kwargs)
 
         if self.tabpfn:
             assert self.tabpfn > 0
-            self.xgber_ = NanTabPFNClassifier(N_ensemble_configurations=self.tabpfn, seed=42)
+            my_kwargs = TABPFN_DEFAULT_KWARGS | clf_kwargs
+            self.clfer_ = NanTabPFNClassifier(**my_kwargs)
 
         self.constant_val_ = None
 
         if depth > 0:
             self.left_child_ = Baltobot(
                 depth=depth - 1,
-                xgboost_kwargs=xgboost_kwargs,
+                clf_kwargs=clf_kwargs,
                 strategy=strategy,
                 softmax_temp=softmax_temp,
                 tabpfn=tabpfn,
@@ -179,7 +182,7 @@ class Baltobot(BaseEstimator):
             )
             self.right_child_ = Baltobot(
                 depth=depth - 1,
-                xgboost_kwargs=xgboost_kwargs,
+                clf_kwargs=clf_kwargs,
                 strategy=strategy,
                 softmax_temp=softmax_temp,
                 tabpfn=tabpfn,
@@ -223,7 +226,7 @@ class Baltobot(BaseEstimator):
             return self
         y_enc = self.encoder_.transform(y_quant)
 
-        self.xgber_.fit(X, y_enc)
+        self.clfer_.fit(X, y_enc)
 
         if self.depth > 0:
             left_ixs = y_enc == 0
@@ -256,7 +259,7 @@ class Baltobot(BaseEstimator):
         if self.constant_val_ is not None:
             return np.full((n,), fill_value=self.constant_val_)
 
-        pred_prob = self.xgber_.predict_proba(X)
+        pred_prob = self.clfer_.predict_proba(X)
 
         with np.errstate(divide='ignore'):
             annealed_logits = np.log(pred_prob) / self.softmax_temp
@@ -311,9 +314,9 @@ class Baltobot(BaseEstimator):
         if self.tabpfn:
             XX = X.copy()
             XX[np.isnan(XX)] = rng.normal(size=XX.shape)[np.isnan(XX)]
-            pred_prob = self.xgber_.predict_proba(XX)
+            pred_prob = self.clfer_.predict_proba(XX)
         else:
-            pred_prob = self.xgber_.predict_proba(X)
+            pred_prob = self.clfer_.predict_proba(X)
 
         y_quant = self.quantizer_.transform(y.reshape(-1, 1)).ravel()
         y_enc = self.encoder_.transform(y_quant)
