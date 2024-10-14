@@ -1,1 +1,4 @@
-*.ipynb binary
+# *.ipynb binary
+*.pdf binary
+*.eps binary
+*.png binary
