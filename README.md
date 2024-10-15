@@ -2,6 +2,7 @@
 
 [![PyPI version](https://badge.fury.io/py/utrees.svg)](https://badge.fury.io/py/utrees)
 [![Downloads](https://static.pepy.tech/badge/utrees)](https://pepy.tech/project/utrees)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 UnmaskingTrees is a method for tabular data generation and imputation. It's an order-agnostic autoregressive diffusion model, wherein a training dataset is constructed by incrementally masking features in random order. Per-feature gradient-boosted trees are then trained to unmask each feature. Read more about it in my [paper](https://arxiv.org/abs/2407.05593)!
 
