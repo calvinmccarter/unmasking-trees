@@ -44,6 +44,7 @@ class NanTabPFNClassifier(BaseEstimator, ClassifierMixin):
     ):
         self.Xtrain = X.copy()
         self.ytrain = y.copy()
+        self.n_classes = np.unique(y).shape[0]
         return self
 
     def predict_proba(
@@ -53,7 +54,7 @@ class NanTabPFNClassifier(BaseEstimator, ClassifierMixin):
         dtype = self.Xtrain.dtype
         X = X.astype(dtype)
         n_test, d = X.shape
-        pred_probas = np.zeros((n_test, 2), dtype=dtype)
+        pred_probas = np.zeros((n_test, self.n_classes), dtype=dtype)
 
         obsXtest = ~np.isnan(X)
         obsXtrain = ~np.isnan(self.Xtrain)
