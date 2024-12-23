@@ -100,6 +100,8 @@ class UnmaskingTrees(BaseEstimator):
         softmax_temp: float = 1.0,
         cast_float32: bool = True,
         tabpfn: bool = False,
+        leaf: str = "uniform",
+        leaf_kwargs: dict = {},
         random_state=None,
     ):
         self.depth = depth
@@ -109,6 +111,8 @@ class UnmaskingTrees(BaseEstimator):
         self.softmax_temp = softmax_temp
         self.cast_float32 = cast_float32
         self.tabpfn = tabpfn
+        self.leaf = leaf
+        self.leaf_kwargs = leaf_kwargs
         self.random_state = random_state
 
         if self.tabpfn:
@@ -237,6 +241,8 @@ class UnmaskingTrees(BaseEstimator):
                     strategy=self.strategy,
                     softmax_temp=self.softmax_temp,
                     tabpfn=self.tabpfn,
+                    leaf=self.leaf,
+                    leaf_kwargs=self.leaf_kwargs,
                     random_state=self.random_state_,
                 )
                 balto.fit(curX_train, curY_train)

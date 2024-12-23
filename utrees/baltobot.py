@@ -5,6 +5,8 @@ import warnings
 import numpy as np
 import xgboost as xgb
 
+from ForestDiffusion import ForestDiffusionModel
+from ngboost import NGBRegressor
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.preprocessing import LabelEncoder
 from sklearn.utils import check_random_state
@@ -115,8 +117,14 @@ class Baltobot(BaseEstimator):
         As temperature decreases below the default of 1, predictions converge
         to the argmax of each conditional distribution.
 
-    tabpfn: bool, or int >= 0
+    tabpfn : bool, or int >= 0
         Whether to use TabPFN instead of XGBoost classifier.
+
+    leaf : 'uniform' (default), 'flow', 'vp', 'ngboost'
+        Method for generating data at leaf nodes.
+
+    leaf_kwargs : dict
+        Arguments for leaf-node generation method.
 
     random_state : int, RandomState instance or None, default=None
         Determines random number generation.
@@ -137,6 +145,9 @@ class Baltobot(BaseEstimator):
     clfer_ : XGBClassifier
         Binary classifier that tell us whether to go left or right bin.
 
+    leaf_ : NGBRegressor, ForestDiffusionModel, or None
+        Generator model at leaf node
+
     left_child_, right_child_ : Baltobot
         Next level in the balanced binary tree.
     """
@@ -148,6 +159,8 @@ class Baltobot(BaseEstimator):
         strategy: str = "kdiquantile",
         softmax_temp: float = 1.0,
         tabpfn: bool = False,
+        leaf: str = "uniform",
+        leaf_kwargs: dict = {},
         random_state=None,
     ):
 
@@ -156,8 +169,11 @@ class Baltobot(BaseEstimator):
         self.strategy = strategy
         self.softmax_temp = softmax_temp
         self.tabpfn = tabpfn
+        self.leaf = leaf
+        self.leaf_kwargs = leaf_kwargs
         self.random_state = check_random_state(random_state)
         assert depth < 10  # 2^10 models is insane
+        assert leaf in ("uniform", "flow", "vp", "ngboost")
 
         self.left_child_ = None
         self.right_child_ = None
@@ -184,6 +200,8 @@ class Baltobot(BaseEstimator):
                 strategy=strategy,
                 softmax_temp=softmax_temp,
                 tabpfn=tabpfn,
+                leaf=leaf,
+                leaf_kwargs=leaf_kwargs,
                 random_state=self.random_state,
             )
             self.right_child_ = Baltobot(
@@ -192,6 +210,8 @@ class Baltobot(BaseEstimator):
                 strategy=strategy,
                 softmax_temp=softmax_temp,
                 tabpfn=tabpfn,
+                leaf=leaf,
+                leaf_kwargs=leaf_kwargs,
                 random_state=self.random_state,
             )
 
@@ -239,6 +259,18 @@ class Baltobot(BaseEstimator):
             right_ixs = y_enc == 1
             self.left_child_.fit(X[left_ixs, :], y[left_ixs])
             self.right_child_.fit(X[right_ixs, :], y[right_ixs])
+        else:
+            if self.leaf == "uniform":
+                pass
+            elif self.leaf in ("flow", "vp"):
+                self.leaf_ = ForestDiffusionModel(
+                    X=y.reshape(-1, 1),
+                    X_covs=X,
+                    diffusion_type=self.leaf,
+                    **self.leaf_kwargs,
+                )
+            elif self.leaf == "ngboost":
+                self.leaf_ = NGBRegressor(verbose=False, **self.leaf_kwargs).fit(X, y)
 
         return self
 
@@ -277,10 +309,15 @@ class Baltobot(BaseEstimator):
             pred_enc[i] = rng.choice(a=len(self.encoder_.classes_), p=pred_prob[i, :])
 
         if self.depth == 0:
-            pred_quant = self.encoder_.inverse_transform(pred_enc)
-            pred_val = self.quantizer_.inverse_transform_sample(
-                pred_quant.reshape(-1, 1)
-            )
+            if self.leaf == "uniform":
+                pred_quant = self.encoder_.inverse_transform(pred_enc)
+                pred_val = self.quantizer_.inverse_transform_sample(
+                    pred_quant.reshape(-1, 1)
+                )
+            elif self.leaf in ("flow", "vp"):
+                pred_val = self.leaf_.generate(batch_size=n, X_covs=X)
+            elif self.leaf == "ngboost":
+                pred_val = self.leaf_.pred_dist(X=X).sample(m=1)
             return pred_val.ravel()
         else:
             left_ixs = pred_enc == 0
@@ -315,7 +352,7 @@ class Baltobot(BaseEstimator):
             probability densities, after exponentiating, though will not
             necessarily exactly sum to 1 due to numerical error.
         """
-
+        assert self.leaf == "uniform"
         n, d = X.shape
         rng = check_random_state(self.random_state)
         if self.constant_val_ is not None:
