@@ -50,7 +50,7 @@ parser.add_argument('--out_path', type=str, default='jolicoea/tabular_imputation
 parser.add_argument("--restore_from_name", type=str2bool, default=False, help="if True, restore session based on name")
 parser.add_argument("--name", type=str, default='my_exp', help="used when restoring from crashed instances")
 
-parser.add_argument("--methods", type=str, nargs='+', default=['utab'], help="oracle, GAIN, KNN, MissForest, miceforest, forest_diffusion, ice, softimpute, OT")
+parser.add_argument("--methods", type=str, nargs='+', default=['utrees-flow', 'utrees-vp'], help="oracle, GAIN, KNN, MissForest, miceforest, forest_diffusion, ice, softimpute, OT")
 parser.add_argument('--nexp', type=int, default=3,
                     help='number of experiences per method')
 parser.add_argument('--nimp', type=int, default=5,
@@ -319,6 +319,38 @@ if __name__ == "__main__":
                     for imp_i in range(args.nimp):
                         data["imp"][method].append(my_imp[imp_i, :, :])
                     torch.set_default_tensor_type('torch.DoubleTensor')
+
+                elif method == 'utrees-flow':
+                    utree = UnmaskingTrees(random_state=n, leaf='flow')
+                    # indicate which column is categorical so that they are handled properly
+                    quantize_cols = []
+                    for i in range(data_nas.shape[1]):
+                        if i in bin_indexes + cat_indexes:
+                            quantize_cols.append('categorical')
+                        elif i in int_indexes:
+                            quantize_cols.append('integer')
+                        else:
+                            quantize_cols.append('continuous')
+                    utree.fit(X=data_nas, quantize_cols=quantize_cols)
+                    my_imp = utree.impute(n_impute=args.nimp)  # (nimp, n, d)
+                    for imp_i in range(args.nimp):
+                        data["imp"][method].append(my_imp[imp_i, :, :])
+
+                elif method == 'utrees-vp':
+                    utree = UnmaskingTrees(random_state=n, leaf='vp')
+                    # indicate which column is categorical so that they are handled properly
+                    quantize_cols = []
+                    for i in range(data_nas.shape[1]):
+                        if i in bin_indexes + cat_indexes:
+                            quantize_cols.append('categorical')
+                        elif i in int_indexes:
+                            quantize_cols.append('integer')
+                        else:
+                            quantize_cols.append('continuous')
+                    utree.fit(X=data_nas, quantize_cols=quantize_cols)
+                    my_imp = utree.impute(n_impute=args.nimp)  # (nimp, n, d)
+                    for imp_i in range(args.nimp):
+                        data["imp"][method].append(my_imp[imp_i, :, :])
 
                 elif method == 'forest_diffusion':
 
