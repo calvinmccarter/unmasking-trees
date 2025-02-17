@@ -196,26 +196,10 @@ class UnmaskingTrees(BaseEstimator):
             self.encoders_.append(cur_enc)
 
         # Generate training data
-        """
-        for n in range(n_samples):
-            obs_ixs = np.where(~np.isnan(X[n, :]))
-            n_obs = obs_ixs.shape[0]
-            n_dups = self.duplicate_X * n_obs # TODO: or just duplicate_X?
-            n_tomask = rng.randint(low=1, high=n_obs, size
-            repYn = np.tile(X[n, :], (n_dups, 1))
-            repXn = np.tile(X[n, :], (n_dups, 1))
-        """
         n_dups = self.duplicate_K * n_dims  # TODO
         n_train = n_samples * n_dups
         Y_train = np.tile(X, (n_dups, 1))
         X_train = np.tile(X, (n_dups, 1))
-        """
-        nums_to_mask = rng.randint(low=1, high=n_dims, size=n_train)
-        for tix in range(n_train):
-            num_to_mask = nums_to_mask[tix]
-            to_mask = rng.choice(n_dims, size=num_to_mask, replace=False)
-            X_train[tix, to_mask] = np.nan
-        """
         rates = rng.uniform(low=0.0, high=1.0, size=(n_train, 1))
         unifs = rng.uniform(low=0.0, high=1.0, size=(n_train, n_dims))
         X_train[unifs < rates] = np.nan
@@ -237,8 +221,6 @@ class UnmaskingTrees(BaseEstimator):
             curX_train = np.c_[X_train[train_ixs, :d], X_train[train_ixs, d + 1 :]]
             if self.quantize_cols_[d]:
                 curY_train = Y_train[train_ixs, d]
-                # print(np.c_[curX_train, curY_train.reshape(-1, 1)])
-                # return self
                 balto = Baltobot(
                     depth=self.depth,
                     clf_kwargs=self.clf_kwargs,
