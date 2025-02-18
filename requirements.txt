@@ -6,10 +6,9 @@ scikit-learn>=0.23
 scipy>=1.0
 tqdm
 torch
-lightgbm
+kditransform
 xgboost
 pandas
-matplotlib
-jupyterlab
-seaborn
-tabpfn<2
+
+# Due to a numpy version conflict, if you want to use TabPFN, afterwards pip install:
+# tabpfn==0.1.11
