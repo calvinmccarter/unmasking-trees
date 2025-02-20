@@ -8,5 +8,9 @@ seaborn
 pot  # for script_imputation.py
 statsmodels  # for script_imputation.py
 wget  # for script_imputation.py
+xlrd  # for script_imputation.py
+openpyxl # for script_imputation.py
+pyfonts  # for moons.ipynb
+
 
 
