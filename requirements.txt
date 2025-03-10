@@ -12,4 +12,3 @@ pandas
 matplotlib
 jupyterlab
 seaborn
-tabpfn<2

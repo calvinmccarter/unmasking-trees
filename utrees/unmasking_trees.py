@@ -40,14 +40,9 @@ class UnmaskingTrees(BaseEstimator):
         Depth of balanced binary tree for recursively quantizing each feature.
         The total number of quantization bins is 2^depth.
 
-    duplication : 'constant', 'linear'
-        How to scale the amount of duplication in terms of feature dimensionality.
-
     duplicate_K : int > 0
         Number of random masking orders per actual sample.
-        If duplication is 'constant', then the training dataset will be of
-        size (n_samples * duplicate_K, n_dims). If duplication is 'linear', then the
-        training dataset will be of size (n_samples * duplicate_K * n_dims, n_dims).
+        The training dataset will be of size (n_samples * n_dims * duplicate_K, n_dims).
 
     clf_kwargs : dict
         Arguments for XGBoost (or TabPFN) classifier.
@@ -99,8 +94,7 @@ class UnmaskingTrees(BaseEstimator):
     def __init__(
         self,
         depth: int = 4,
-        duplication: str = "constant",
-        duplicate_K: int = 100,
+        duplicate_K: int = 50,
         clf_kwargs: dict = {},
         strategy: str = "kdiquantile",
         softmax_temp: float = 1.0,
@@ -109,7 +103,6 @@ class UnmaskingTrees(BaseEstimator):
         random_state=None,
     ):
         self.depth = depth
-        self.duplication = duplication
         self.duplicate_K = duplicate_K
         self.clf_kwargs = clf_kwargs
         self.strategy = strategy
@@ -124,7 +117,6 @@ class UnmaskingTrees(BaseEstimator):
             self.clf_kwargs_ = XGBOOST_DEFAULT_KWARGS.copy()
         self.clf_kwargs_.update(clf_kwargs)
 
-        assert duplication in ("constant", "linear")
         assert 1 <= duplicate_K
         assert strategy in ("kdiquantile", "quantile", "uniform", "kmeans")
         assert 0 < softmax_temp
@@ -163,8 +155,6 @@ class UnmaskingTrees(BaseEstimator):
         if self.cast_float32:
             X = X.astype(np.float32)
         n_samples, n_dims = X.shape
-        assert n_samples > 1
-        assert n_dims > 1
 
         if isinstance(quantize_cols, list):
             assert len(quantize_cols) == n_dims
@@ -206,10 +196,7 @@ class UnmaskingTrees(BaseEstimator):
             self.encoders_.append(cur_enc)
 
         # Generate training data
-        if self.duplication == "constant":
-            n_dups = self.duplicate_K
-        elif self.duplication == "linear":
-            n_dups = self.duplicate_K * n_dims
+        n_dups = self.duplicate_K * n_dims  # TODO
         n_train = n_samples * n_dups
         Y_train = np.tile(X, (n_dups, 1))
         X_train = np.tile(X, (n_dups, 1))
@@ -328,16 +315,17 @@ class UnmaskingTrees(BaseEstimator):
                     pbar.update(1)
                     for dix in range(n_to_unmask):
                         unmask_ix = unmask_ixs[kix, dix]
-                        curX_test = np.c_[
-                            imputedX[kix, [n], :unmask_ix],
-                            imputedX[kix, [n], unmask_ix + 1 :],
-                        ]
-                        print(curX_test.shape)
                         if self.quantize_cols_[unmask_ix]:
-                            pred_val = self.trees_[unmask_ix].sample(curX_test)
+                            pred_val = self.trees_[unmask_ix].sample(
+                                np.c_[
+                                    imputedX[kix, [n], :unmask_ix],
+                                    imputedX[kix, [n], unmask_ix + 1 :],
+                                ]
+                            )
                         else:
+                            # TODO: use TabPFN if requested
                             pred_probas = self.trees_[unmask_ix].predict_proba(
-                                curX_test
+                                imputedX[kix, [n], :]
                             )
                             with np.errstate(divide="ignore"):
                                 annealed_logits = (
