@@ -332,6 +332,7 @@ class UnmaskingTrees(BaseEstimator):
                             imputedX[kix, [n], :unmask_ix],
                             imputedX[kix, [n], unmask_ix + 1 :],
                         ]
+                        print(curX_test.shape)
                         if self.quantize_cols_[unmask_ix]:
                             pred_val = self.trees_[unmask_ix].sample(curX_test)
                         else:
